@@ -3,7 +3,7 @@
 set -e
 
 REPO_USER="AlirezaSayyari"
-REPO_NAME="grex"
+REPO_NAME="GREX"
 BRANCH="main"
 TMPDIR=$(mktemp -d)
 

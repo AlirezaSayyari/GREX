@@ -35,7 +35,7 @@ This design keeps routing simple by:
 ### 1. One-line install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AlirezaSayyari/grex/main/bootstrap.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/AlirezaSayyari/GREX/main/bootstrap.sh | sudo bash
 ```
 
 ### 2. Install required utilities
@@ -52,8 +52,8 @@ sudo dnf install -y dnsmasq iptables-services || sudo yum install -y dnsmasq ipt
 ### 3. Alternative manual install
 
 ```bash
-git clone https://github.com/AlirezaSayyari/grex.git
-cd grex
+git clone https://github.com/AlirezaSayyari/GREX.git
+cd GREX
 sudo bash install.sh
 sudo bash setup.sh
 ```
