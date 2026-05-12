@@ -2,26 +2,38 @@
 
 # Install script for GRE Tunnel project
 
+set -e
+
+if [ "$EUID" -ne 0 ]; then
+    SUDO=sudo
+else
+    SUDO=:
+fi
+
 echo "Installing GRE Tunnel scripts..."
 
 # Copy scripts to system locations
-sudo cp gre-tunnel.sh /usr/local/bin/
-sudo cp gre-tunnel-stop.sh /usr/local/bin/
-sudo cp check.sh /usr/local/bin/
-sudo cp health.sh /usr/local/bin/
-sudo cp manage.sh /usr/local/bin/
+$SUDO cp gre-tunnel.sh /usr/local/bin/
+$SUDO cp gre-tunnel-stop.sh /usr/local/bin/
+$SUDO cp check.sh /usr/local/bin/
+$SUDO cp health.sh /usr/local/bin/
+$SUDO cp manage.sh /usr/local/bin/
 
 # Make executable
-sudo chmod +x /usr/local/bin/gre-tunnel.sh
-sudo chmod +x /usr/local/bin/gre-tunnel-stop.sh
-sudo chmod +x /usr/local/bin/check.sh
-sudo chmod +x /usr/local/bin/health.sh
-sudo chmod +x /usr/local/bin/manage.sh
-sudo ln -sf /usr/local/bin/manage.sh /usr/local/bin/grex
-sudo chmod +x /usr/local/bin/grex
+$SUDO chmod +x /usr/local/bin/gre-tunnel.sh
+$SUDO chmod +x /usr/local/bin/gre-tunnel-stop.sh
+$SUDO chmod +x /usr/local/bin/check.sh
+$SUDO chmod +x /usr/local/bin/health.sh
+$SUDO chmod +x /usr/local/bin/manage.sh
+$SUDO ln -sf /usr/local/bin/manage.sh /usr/local/bin/grex
+$SUDO ln -sf /usr/local/bin/manage.sh /usr/bin/grex
+$SUDO chmod +x /usr/local/bin/grex
+$SUDO chmod +x /usr/bin/grex
 
 # Copy service file
-sudo cp gre-tunnel.service /etc/systemd/system/
+$SUDO cp gre-tunnel.service /etc/systemd/system/
+
+$SUDO systemctl daemon-reload
 
 echo "Installation complete."
 echo "Run 'sudo grex' to manage the tunnel service or 'sudo bash setup.sh' to configure."
