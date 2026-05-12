@@ -1,0 +1,19 @@
+# Example GRE Tunnel Configuration for Multiple Tunnels
+# Copy this to /etc/gre-tunnel.conf and modify as needed
+
+VPS_PUBLIC_IP=130.x.x.x
+FORTI_PUBLIC_IP=93.x.x.x
+NUM_TUNNELS=2
+INTERNAL_SUBNETS=192.168.0.0/16,172.16.0.0/12
+DNS_SERVERS=1.1.1.1,8.8.8.8
+ETH_INTERFACE=eth0
+
+# Tunnel 1
+TUNNEL_1_VPS_IP=10.10.10.2/30
+TUNNEL_1_FORTI_IP=10.10.10.1
+TUNNEL_1_GRE_IF=gre-forti1
+
+# Tunnel 2
+TUNNEL_2_VPS_IP=10.10.11.2/30
+TUNNEL_2_FORTI_IP=10.10.11.1
+TUNNEL_2_GRE_IF=gre-forti2

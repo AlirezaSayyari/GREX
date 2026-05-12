@@ -46,7 +46,7 @@ Servers (selected subnets)
         ↓
 FortiGate (Policy-Based Routing)
         ↓
-GRE Tunnel
+Multiple GRE Tunnels (Load Balanced)
         ↓
 VPS (NAT + DNS)
         ↓
@@ -58,8 +58,9 @@ Key design decisions:
 * No proxy
 * NAT only on VPS
 * PBR on Forti
-* DNS forwarded through tunnel
+* DNS forwarded through tunnels
 * GRE kept alive via SD-WAN SLA
+* Multiple tunnels for higher throughput and redundancy
 
 ---
 
@@ -184,38 +185,54 @@ sudo systemctl enable --now dnsmasq
 
 # 🟣 5. FortiGate Config
 
-## GRE interface
+## Multiple GRE interfaces
+
+For each tunnel (e.g., 2 tunnels):
 
 ```
 config system gre-tunnel
- edit toVPS
+ edit toVPS1
   set interface wan1
   set remote-gw VPS_PUBLIC_IP
+  set key 1
+ next
+ edit toVPS2
+  set interface wan1
+  set remote-gw VPS_PUBLIC_IP
+  set key 2
  next
 end
 ```
 
-Assign IP:
+Assign IPs:
 
 ```
-10.10.10.1/32
+toVPS1: 10.10.10.1/32
+toVPS2: 10.10.11.1/32
 ```
 
 ---
 
-## Static route
+## Static routes with load balancing
 
 ```
 config router static
- edit 0
+ edit 1
   set dst 0.0.0.0/0
   set gateway 10.10.10.2
-  set device toVPS
+  set device toVPS1
+  set priority 1
+ next
+ edit 2
+  set dst 0.0.0.0/0
+  set gateway 10.10.11.2
+  set device toVPS2
+  set priority 1
  next
 end
 ```
 
-(only for PBR traffic)
+This creates ECMP load balancing across tunnels.
 
 ---
 
@@ -254,18 +271,102 @@ This prevents tunnel drop.
 
 ---
 
-# 🟣 6. Monitoring
+# 🟣 6. Automated Setup with Wizard
+
+This project now includes automated setup scripts for easy deployment.
+
+### Prerequisites
+
+- Rocky Linux or CentOS 7+
+- Root access
+- Internet connection
+
+### Quick Setup
+
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/controlled-egress-gre-tunnel.git
+cd controlled-egress-gre-tunnel
+```
+
+2. Install the scripts:
+```bash
+sudo bash install.sh
+```
+
+3. Run the setup wizard:
+```bash
+sudo bash setup.sh
+```
+
+The wizard will prompt for:
+- VPS Public IP
+- FortiGate Public IP
+- Number of parallel tunnels (for higher throughput)
+- Internal subnets
+- DNS servers
+- Ethernet interface
+- For each tunnel: IP addresses and interface names
+
+3. Start the service:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable gre-tunnel
+sudo systemctl start gre-tunnel
+sudo systemctl enable dnsmasq
+sudo systemctl start dnsmasq
+```
+
+### Management Commands
+
+Use the management script for common operations:
+
+```bash
+# Enable service
+sudo ./manage.sh enable
+
+# Start service
+sudo ./manage.sh start
+
+# Check status
+sudo ./manage.sh status
+
+# View logs
+sudo ./manage.sh logs
+
+# Health check
+sudo ./manage.sh health
+
+# Check policies and routing
+sudo ./manage.sh check
+
+# Stop service
+sudo ./manage.sh stop
+
+# Disable service
+sudo ./manage.sh disable
+```
+
+### Manual Configuration (Alternative)
+
+If you prefer manual setup, follow the original steps in section 3.
+
+---
+
+# 🟣 7. Monitoring
 
 ### Tunnel traffic
 
 ```bash
-tcpdump -ni gre-forti
+tcpdump -ni gre-forti1
+tcpdump -ni gre-forti2
 ```
 
 ### DNS
 
 ```bash
-tcpdump -ni gre-forti port 53
+tcpdump -ni gre-forti1 port 53
+tcpdump -ni gre-forti2 port 53
 ```
 
 ### NAT
@@ -274,9 +375,16 @@ tcpdump -ni gre-forti port 53
 iptables -t nat -L -n -v
 ```
 
+### Automated Checks
+
+```bash
+sudo ./manage.sh check
+sudo ./manage.sh health
+```
+
 ---
 
-# 🟣 7. Testing
+# 🟣 8. Testing
 
 From server:
 
@@ -292,12 +400,13 @@ VPS public IP
 
 ---
 
-# 🟣 8. Lessons learned
+# 🟣 9. Lessons learned
 
 * Proxy ≠ infrastructure solution
 * Routing layer is cleaner
 * DNS must follow same path
 * GRE must be kept alive
+* Multiple tunnels increase throughput and provide redundancy
 * NAT only at egress
 
 ---
