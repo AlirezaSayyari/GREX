@@ -30,6 +30,13 @@ $SUDO ln -sf /usr/local/bin/manage.sh /usr/bin/grex
 $SUDO chmod +x /usr/local/bin/grex
 $SUDO chmod +x /usr/bin/grex
 
+# Create robust wrapper in /usr/bin/grex in case symlink path issues occur
+$SUDO bash -c 'cat > /usr/bin/grex << "EOF"
+#!/bin/bash
+exec /usr/local/bin/manage.sh "$@"
+EOF'
+$SUDO chmod +x /usr/bin/grex
+
 # Copy service file
 $SUDO cp gre-tunnel.service /etc/systemd/system/
 

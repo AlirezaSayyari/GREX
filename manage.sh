@@ -49,10 +49,12 @@ case $COMMAND in
         sudo journalctl -u dnsmasq -n 50 --no-pager
         ;;
     health)
-        ./health.sh
+        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        "$SCRIPT_DIR/health.sh"
         ;;
     check)
-        ./check.sh
+        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        "$SCRIPT_DIR/check.sh"
         ;;
     *)
         usage
