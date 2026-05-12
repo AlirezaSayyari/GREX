@@ -1,221 +1,156 @@
+# Controlled Egress GRE Tunnel
+
+Selective outbound Internet egress for FortiGate-connected LANs using multiple GRE tunnels to a Rocky Linux VPS.
+
+---
+
+## Overview
+
+This repository provides a complete VPS-side implementation for:
+
+- multiple GRE tunnels from FortiGate to VPS
+- load-balanced egress routing
+- NAT for selected internal subnets
+- optional local DNS via `dnsmasq`
+- systemd-managed service and health monitoring
+
+The goal is a stable, observable, and scalable egress path without proxies.
+
+---
+
+## Why this architecture?
+
+Traditional proxy-based solutions break Linux systems, Docker, CI/CD, and package managers.
+This design keeps routing simple by:
+
+- sending only selected subnets through the GRE tunnels
+- NATing only at the VPS egress
+- forwarding DNS through the same tunnel path
+- using multiple GRE tunnels for throughput and resilience
+
+---
+
+## Quick Start
+
+### 1. Install required utilities
+
+For Rocky Linux / CentOS:
+
+```bash
+sudo dnf install -y curl || sudo yum install -y curl
+sudo dnf install -y dnsmasq iptables-services || sudo yum install -y dnsmasq iptables-services
 ```
-Selective Internet Egress Architecture via GRE Tunnel (FortiGate + VPS)
+
+`curl` is required for external IP validation and diagnostic testing.
+
+### 2. Clone the repository
+
+```bash
+git clone https://github.com/yourusername/controlled-egress-gre-tunnel.git
+cd controlled-egress-gre-tunnel
+```
+
+### 3. Install helper scripts
+
+```bash
+sudo bash install.sh
+```
+
+### 4. Run the setup wizard
+
+```bash
+sudo bash setup.sh
+```
+
+The wizard configures:
+
+- VPS public IP
+- FortiGate public IP
+- number of parallel GRE tunnels
+- internal subnets
+- optional local DNS server with `dnsmasq`
+- upstream DNS servers
+- Ethernet egress interface
+- per-tunnel IP and GRE interface names
+
+### 5. Start services
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now gre-tunnel
+sudo systemctl enable --now dnsmasq
 ```
 
 ---
 
-# 🟣 1. Problem Statement
+## Architecture
 
-Running infrastructure from Iran introduces two major constraints:
-
-* Internet filtering
-* Global sanctions on services like Docker, GitHub, AWS
-
-Traditional solution:
-
-```
-HTTP/SOCKS proxy
-```
-
-Problem:
-
-* Linux servers break
-* Docker pull fails
-* CI/CD unstable
-* package managers unreliable
-
-We needed:
-
-```
-Clean outbound internet path
-for selected servers only
-```
-
-Without:
-
-* configuring proxy everywhere
-* breaking routing
-* DNS leaks
-
----
-
-# 🟣 2. Final Architecture
-
-```
+```text
 Servers (selected subnets)
         ↓
 FortiGate (Policy-Based Routing)
         ↓
-Multiple GRE Tunnels (Load Balanced)
+Multiple GRE tunnels (load-balanced)
         ↓
 VPS (NAT + DNS)
         ↓
 Internet
 ```
 
-Key design decisions:
+Key benefits:
 
-* No proxy
-* NAT only on VPS
-* PBR on Forti
-* DNS forwarded through tunnels
-* GRE kept alive via SD-WAN SLA
-* Multiple tunnels for higher throughput and redundancy
+- no proxy dependency
+- clean routing layer
+- DNS follows tunnel path
+- multiple tunnels improve throughput and redundancy
 
 ---
 
-# 🟣 3. VPS Setup (Rocky Linux)
+## Components
 
-## Enable IP forwarding
-
-```bash
-sudo nano /etc/sysctl.conf
-```
-
-```
-net.ipv4.ip_forward=1
-```
-
-```bash
-sudo sysctl -p
-```
+- `setup.sh` — interactive VPS setup wizard
+- `install.sh` — installs helper scripts and systemd unit
+- `gre-tunnel.sh` — creates GRE tunnels, routes, NAT, and firewall rules
+- `gre-tunnel-stop.sh` — removes GRE tunnels and related iptables rules
+- `manage.sh` — enable/disable/start/stop/status/logs/health/check
+- `check.sh` — verifies tunnel interfaces, routing, NAT, and DNS
+- `health.sh` — reports health state for all tunnels
+- `gre-tunnel.service` — systemd unit for tunnel startup
+- `gre-tunnel.conf.example` — sample config
 
 ---
 
-## Create GRE tunnel
+## FortiGate Configuration
 
-```bash
-GRE_IF="gre-forti"
-VPS_PUBLIC_IP="130.x.x.x"
-FORTI_PUBLIC_IP="93.x.x.x"
-TUN_VPS_IP="10.10.10.2/30"
+### Create multiple GRE tunnels
 
-sudo ip link del $GRE_IF 2>/dev/null
+Example for 2 tunnels:
 
-sudo ip tunnel add $GRE_IF mode gre \
-  local $VPS_PUBLIC_IP \
-  remote $FORTI_PUBLIC_IP \
-  ttl 255
-
-sudo ip addr add $TUN_VPS_IP dev $GRE_IF
-sudo ip link set $GRE_IF up
-sudo ip link set $GRE_IF mtu 1476
-```
-
-Check:
-
-```bash
-ip -br a | grep gre
-```
-
----
-
-## Routing internal subnets back to tunnel
-
-```bash
-sudo ip route add 192.168.0.0/16 dev gre-forti
-sudo ip route add 172.16.0.0/12 dev gre-forti
-```
-
----
-
-## NAT outbound traffic
-
-```bash
-sudo iptables -t nat -A POSTROUTING -s 192.168.0.0/16 -o eth0 -j MASQUERADE
-sudo iptables -t nat -A POSTROUTING -s 172.16.0.0/12 -o eth0 -j MASQUERADE
-```
-
----
-
-## Forward rules
-
-```bash
-sudo iptables -I FORWARD 1 -i gre-forti -o eth0 -j ACCEPT
-sudo iptables -I FORWARD 2 -i eth0 -o gre-forti \
-  -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-```
-
----
-
-## Allow GRE
-
-```bash
-sudo iptables -I INPUT -p 47 -s $FORTI_PUBLIC_IP -j ACCEPT
-```
-
----
-
-## Persist rules
-
-```bash
-sudo sh -c 'iptables-save > /etc/sysconfig/iptables'
-```
-
----
-
-# 🟣 4. DNS on VPS
-
-Install dnsmasq:
-
-```bash
-sudo dnf install dnsmasq -y
-```
-
-Config:
-
-```bash
-sudo nano /etc/dnsmasq.d/tunnel.conf
-```
-
-```
-interface=gre-forti
-listen-address=10.10.10.2
-server=1.1.1.1
-server=8.8.8.8
-```
-
-Start:
-
-```bash
-sudo systemctl enable --now dnsmasq
-```
-
----
-
-# 🟣 5. FortiGate Config
-
-## Multiple GRE interfaces
-
-For each tunnel (e.g., 2 tunnels):
-
-```
+```text
 config system gre-tunnel
  edit toVPS1
   set interface wan1
-  set remote-gw VPS_PUBLIC_IP
+  set remote-gw <VPS_PUBLIC_IP>
   set key 1
  next
  edit toVPS2
   set interface wan1
-  set remote-gw VPS_PUBLIC_IP
+  set remote-gw <VPS_PUBLIC_IP>
   set key 2
  next
 end
 ```
 
-Assign IPs:
+Assign IPs for the Forti side:
 
-```
+```text
 toVPS1: 10.10.10.1/32
 toVPS2: 10.10.11.1/32
 ```
 
----
+### Load-balanced static routes
 
-## Static routes with load balancing
-
-```
+```text
 config router static
  edit 1
   set dst 0.0.0.0/0
@@ -232,171 +167,168 @@ config router static
 end
 ```
 
-This creates ECMP load balancing across tunnels.
+This creates ECMP-style load balancing across multiple GRE tunnels.
 
----
+### Policy-based routing
 
-## Policy-Based Routing
-
+Apply PBR on FortiGate so selected source subnets use the GRE tunnels.
 Example:
 
-```
+```text
 Source: 192.168.10.1
-Outgoing: toVPS
-Gateway: 10.10.10.2
+Outgoing Interface: toVPS1 or toVPS2
+Gateway: 10.10.10.2 or 10.10.11.2
+```
+
+### Firewall policy
+
+Allow LAN → GRE traffic and disable NAT on FortiGate.
+
+---
+
+## VPS Manual Setup Reference
+
+### 1. Enable IP forwarding
+
+```bash
+sudo bash -c 'echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf'
+sudo sysctl -p
+```
+
+### 2. Create a GRE tunnel
+
+```bash
+sudo ip link del gre-forti1 2>/dev/null
+sudo ip tunnel add gre-forti1 mode gre local <VPS_PUBLIC_IP> remote <FORTI_PUBLIC_IP> ttl 255 key 1
+sudo ip addr add 10.10.10.2/30 dev gre-forti1
+sudo ip link set gre-forti1 up
+sudo ip link set gre-forti1 mtu 1476
+```
+
+Repeat for additional tunnels with different keys and IPs.
+
+### 3. Add internal routes
+
+```bash
+sudo ip route add 192.168.0.0/16 dev gre-forti1
+sudo ip route add 172.16.0.0/12 dev gre-forti1
+```
+
+### 4. Configure NAT
+
+```bash
+sudo iptables -t nat -A POSTROUTING -s 192.168.0.0/16 -o eth0 -j MASQUERADE
+sudo iptables -t nat -A POSTROUTING -s 172.16.0.0/12 -o eth0 -j MASQUERADE
+```
+
+### 5. Configure forwarding
+
+```bash
+sudo iptables -I FORWARD -i gre-forti1 -o eth0 -j ACCEPT
+sudo iptables -I FORWARD -i eth0 -o gre-forti1 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+```
+
+### 6. Allow GRE
+
+```bash
+sudo iptables -I INPUT -p 47 -s <FORTI_PUBLIC_IP> -j ACCEPT
+```
+
+### 7. Persist rules
+
+```bash
+sudo sh -c 'iptables-save > /etc/sysconfig/iptables'
 ```
 
 ---
 
-## Firewall policy
+## DNS on VPS
 
+If DNS is enabled in the wizard, `dnsmasq` is configured automatically for each GRE interface.
+
+Example rule file:
+
+```text
+interface=gre-forti1
+listen-address=10.10.10.2
+interface=gre-forti2
+listen-address=10.10.11.2
+server=1.1.1.1
+server=8.8.8.8
 ```
-LAN → GRE
-NAT: disable
+
+Start dnsmasq with:
+
+```bash
+sudo systemctl enable --now dnsmasq
 ```
 
 ---
 
-## SD-WAN SLA (important)
+## Management
 
-Add GRE as member
-Health check:
-
-```
-Ping 10.10.10.2
-interval 3
-```
-
-This prevents tunnel drop.
-
----
-
-# 🟣 6. Automated Setup with Wizard
-
-This project now includes automated setup scripts for easy deployment.
-
-### Prerequisites
-
-- Rocky Linux or CentOS 7+
-- Root access
-- Internet connection
-
-### Quick Setup
-
-1. Clone the repository:
-```bash
-git clone https://github.com/yourusername/controlled-egress-gre-tunnel.git
-cd controlled-egress-gre-tunnel
-```
-
-2. Install the scripts:
-```bash
-sudo bash install.sh
-```
-
-3. Run the setup wizard:
-```bash
-sudo bash setup.sh
-```
-
-The wizard will prompt for:
-- VPS Public IP
-- FortiGate Public IP
-- Number of parallel tunnels (for higher throughput)
-- Internal subnets
-- DNS servers
-- Ethernet interface
-- For each tunnel: IP addresses and interface names
-
-3. Start the service:
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable gre-tunnel
-sudo systemctl start gre-tunnel
-sudo systemctl enable dnsmasq
-sudo systemctl start dnsmasq
-```
-
-### Management Commands
-
-Use the management script for common operations:
+Use the management helper script for service lifecycle and diagnostics:
 
 ```bash
-# Enable service
 sudo ./manage.sh enable
-
-# Start service
 sudo ./manage.sh start
-
-# Check status
 sudo ./manage.sh status
-
-# View logs
 sudo ./manage.sh logs
-
-# Health check
 sudo ./manage.sh health
-
-# Check policies and routing
 sudo ./manage.sh check
-
-# Stop service
 sudo ./manage.sh stop
-
-# Disable service
 sudo ./manage.sh disable
 ```
 
-### Manual Configuration (Alternative)
-
-If you prefer manual setup, follow the original steps in section 3.
-
 ---
 
-# 🟣 7. Monitoring
+## Monitoring and Diagnostics
 
-### Tunnel traffic
+### Traffic monitoring
 
 ```bash
 tcpdump -ni gre-forti1
 tcpdump -ni gre-forti2
 ```
 
-### DNS
+### DNS monitoring
 
 ```bash
 tcpdump -ni gre-forti1 port 53
 tcpdump -ni gre-forti2 port 53
 ```
 
-### NAT
+### NAT and firewall inspection
 
 ```bash
-iptables -t nat -L -n -v
-```
-
-### Automated Checks
-
-```bash
-sudo ./manage.sh check
-sudo ./manage.sh health
+sudo iptables -t nat -L -n -v
+sudo iptables -L FORWARD -n -v
 ```
 
 ---
 
-# 🟣 8. Testing
+## Validation
 
-From server:
+From an internal server behind FortiGate:
 
 ```bash
 curl ifconfig.io
 ```
 
-Expected:
+Expected output:
 
+```text
+<VPS public IP>
 ```
-VPS public IP
-```
+
+---
+
+## Notes
+
+- This solution is designed for environments where outbound traffic must be routed cleanly through a trusted egress VPS.
+- Multiple GRE tunnels increase throughput and resilience, but FortiGate must be configured with matching tunnel keys and IPs.
+- Use the wizard for fast deployment; the manual section is provided for reference and troubleshooting.
+
 
 ---
 
