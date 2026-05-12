@@ -34,13 +34,9 @@ This design keeps routing simple by:
 
 ### 1. One-line install
 
-If the repository is hosted on GitHub as `grex`, use this command:
-
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yourusername/grex/main/bootstrap.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/AlirezaSayyari/grex/main/bootstrap.sh | sudo bash
 ```
-
-Replace `yourusername` with the actual GitHub owner name.
 
 ### 2. Install required utilities
 
@@ -55,10 +51,8 @@ sudo dnf install -y dnsmasq iptables-services || sudo yum install -y dnsmasq ipt
 
 ### 3. Alternative manual install
 
-If you need the repository locally:
-
 ```bash
-git clone https://github.com/yourusername/grex.git
+git clone https://github.com/AlirezaSayyari/grex.git
 cd grex
 sudo bash install.sh
 sudo bash setup.sh
