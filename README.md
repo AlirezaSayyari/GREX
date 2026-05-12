@@ -32,7 +32,17 @@ This design keeps routing simple by:
 
 ## Quick Start
 
-### 1. Install required utilities
+### 1. One-line install
+
+If the repository is hosted on GitHub as `grex`, use this command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yourusername/grex/main/bootstrap.sh | sudo bash
+```
+
+Replace `yourusername` with the actual GitHub owner name.
+
+### 2. Install required utilities
 
 For Rocky Linux / CentOS:
 
@@ -43,22 +53,14 @@ sudo dnf install -y dnsmasq iptables-services || sudo yum install -y dnsmasq ipt
 
 `curl` is required for external IP validation and diagnostic testing.
 
-### 2. Clone the repository
+### 3. Alternative manual install
+
+If you need the repository locally:
 
 ```bash
-git clone https://github.com/yourusername/controlled-egress-gre-tunnel.git
-cd controlled-egress-gre-tunnel
-```
-
-### 3. Install helper scripts
-
-```bash
+git clone https://github.com/yourusername/grex.git
+cd grex
 sudo bash install.sh
-```
-
-### 4. Run the setup wizard
-
-```bash
 sudo bash setup.sh
 ```
 
@@ -113,6 +115,7 @@ Key benefits:
 - `gre-tunnel.sh` — creates GRE tunnels, routes, NAT, and firewall rules
 - `gre-tunnel-stop.sh` — removes GRE tunnels and related iptables rules
 - `manage.sh` — enable/disable/start/stop/status/logs/health/check
+- `grex` — shortcut command linked to `manage.sh`
 - `check.sh` — verifies tunnel interfaces, routing, NAT, and DNS
 - `health.sh` — reports health state for all tunnels
 - `gre-tunnel.service` — systemd unit for tunnel startup
@@ -267,17 +270,17 @@ sudo systemctl enable --now dnsmasq
 
 ## Management
 
-Use the management helper script for service lifecycle and diagnostics:
+Use the `grex` shortcut for service lifecycle and diagnostics:
 
 ```bash
-sudo ./manage.sh enable
-sudo ./manage.sh start
-sudo ./manage.sh status
-sudo ./manage.sh logs
-sudo ./manage.sh health
-sudo ./manage.sh check
-sudo ./manage.sh stop
-sudo ./manage.sh disable
+sudo grex enable
+sudo grex start
+sudo grex status
+sudo grex logs
+sudo grex health
+sudo grex check
+sudo grex stop
+sudo grex disable
 ```
 
 ---

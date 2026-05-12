@@ -17,12 +17,11 @@ sudo chmod +x /usr/local/bin/gre-tunnel-stop.sh
 sudo chmod +x /usr/local/bin/check.sh
 sudo chmod +x /usr/local/bin/health.sh
 sudo chmod +x /usr/local/bin/manage.sh
-sudo chmod +x /usr/local/bin/check.sh
-sudo chmod +x /usr/local/bin/health.sh
-sudo chmod +x /usr/local/bin/manage.sh
+sudo ln -sf /usr/local/bin/manage.sh /usr/local/bin/grex
+sudo chmod +x /usr/local/bin/grex
 
 # Copy service file
 sudo cp gre-tunnel.service /etc/systemd/system/
 
 echo "Installation complete."
-echo "Run 'sudo bash setup.sh' to configure."
+echo "Run 'sudo grex' to manage the tunnel service or 'sudo bash setup.sh' to configure."
