@@ -88,6 +88,10 @@ The wizard configures:
 - Ethernet egress interface
 - per-tunnel IP and GRE interface names
 
+The VPS public IP is auto-detected during setup and shown as the default value.
+Press Enter to accept it, or type another IP if the server is behind a special
+network path.
+
 ### 5. Start services
 
 ```bash

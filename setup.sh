@@ -23,6 +23,46 @@ prompt() {
     printf -v "$var_name" "%s" "${input:-$default_value}"
 }
 
+is_ipv4() {
+    local ip=$1
+    [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+
+    local IFS=.
+    local octets
+    read -r -a octets <<< "$ip"
+    for octet in "${octets[@]}"; do
+        if ((10#$octet < 0 || 10#$octet > 255)); then
+            return 1
+        fi
+    done
+
+    return 0
+}
+
+detect_public_ip() {
+    local endpoint
+    local ip
+    local endpoints=(
+        "https://api.ipify.org"
+        "https://ifconfig.me/ip"
+        "https://checkip.amazonaws.com"
+    )
+
+    if ! command -v curl >/dev/null 2>&1; then
+        return 1
+    fi
+
+    for endpoint in "${endpoints[@]}"; do
+        ip=$(curl -4 -fsS --max-time 5 "$endpoint" 2>/dev/null | tr -d '[:space:]') || true
+        if is_ipv4 "$ip"; then
+            printf "%s" "$ip"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
 install_dependencies() {
     local packages
 
@@ -58,7 +98,8 @@ install_dependencies() {
 echo "Please provide the following configuration details:"
 echo
 
-prompt VPS_PUBLIC_IP "VPS Public IP" "130.x.x.x"
+DETECTED_VPS_PUBLIC_IP=$(detect_public_ip || true)
+prompt VPS_PUBLIC_IP "VPS Public IP" "${DETECTED_VPS_PUBLIC_IP:-130.x.x.x}"
 prompt FORTI_PUBLIC_IP "FortiGate Public IP" "93.x.x.x"
 prompt NUM_TUNNELS "Number of parallel tunnels" "2"
 prompt INTERNAL_SUBNETS "Internal subnets (comma-separated)" "192.168.0.0/16,172.16.0.0/12"
