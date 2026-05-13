@@ -73,8 +73,30 @@ install_dependencies() {
     fi
 
     if command -v apt-get >/dev/null 2>&1; then
+        local policy_file="/usr/sbin/policy-rc.d"
+        local created_policy=0
+        local status=0
+
+        if [ ! -e "$policy_file" ]; then
+            printf '#!/bin/sh\nexit 101\n' > "$policy_file"
+            chmod +x "$policy_file"
+            created_policy=1
+        fi
+
+        set +e
         apt-get update
-        DEBIAN_FRONTEND=noninteractive apt-get install -y "${packages[@]}"
+        status=$?
+        if [ "$status" -eq 0 ]; then
+            DEBIAN_FRONTEND=noninteractive apt-get install -y "${packages[@]}"
+            status=$?
+        fi
+        set -e
+
+        if [ "$created_policy" -eq 1 ]; then
+            rm -f "$policy_file"
+        fi
+
+        return "$status"
     elif command -v dnf >/dev/null 2>&1; then
         if [[ "$ENABLE_DNSMASQ" =~ ^(yes|y|Y)$ ]]; then
             dnf install -y dnsmasq iptables-services
@@ -149,8 +171,12 @@ systemctl daemon-reload
 
 if [[ "$ENABLE_DNSMASQ" =~ ^(yes|y|Y)$ ]]; then
     # Configure dnsmasq
-echo "Configuring DNS..."
+    echo "Configuring DNS..."
+    systemctl stop dnsmasq 2>/dev/null || true
+    mkdir -p /etc/dnsmasq.d
     cat > /etc/dnsmasq.d/tunnel.conf << EOF
+bind-dynamic
+no-resolv
 EOF
 
     for ((i=1; i<=NUM_TUNNELS; i++)); do
@@ -165,7 +191,7 @@ EOF
 
     for dns in $(echo $DNS_SERVERS | tr ',' ' '); do
         echo "server=$dns" >> /etc/dnsmasq.d/tunnel.conf
-done
+    done
 fi
 
 echo "Setup complete! Run the following commands to start:"

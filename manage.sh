@@ -51,14 +51,14 @@ menu() {
         echo "          GREX Egress Gateway           "
         echo "========================================"
         echo "1) Help & Introduction"
-        echo "2) Configure Egress System (Wizard)"
-        echo "3) Activate Egress System"
-        echo "4) Deactivate Egress System"
+        echo "2) Configure GREX System (Wizard)"
+        echo "3) Activate GREX System"
+        echo "4) Deactivate GREX System"
         echo "5) Health Check"
         echo "6) Logs"
-        echo "7) Exit"
+        echo "0) Exit"
         echo
-        read -p "Choose an option [1-7]: " choice
+        read -p "Choose an option [0-6]: " choice
         case "$choice" in
             1)
                 echo
@@ -90,7 +90,7 @@ menu() {
                 sudo journalctl -u dnsmasq -n 50 --no-pager
                 read -p "Press Enter to continue..." _
                 ;;
-            7)
+            0)
                 exit 0
                 ;;
             *)
