@@ -18,6 +18,7 @@ $SUDO cp gre-tunnel-stop.sh /usr/local/bin/
 $SUDO cp check.sh /usr/local/bin/
 $SUDO cp health.sh /usr/local/bin/
 $SUDO cp manage.sh /usr/local/bin/
+$SUDO cp setup.sh /usr/local/bin/
 
 # Make executable
 $SUDO chmod +x /usr/local/bin/gre-tunnel.sh

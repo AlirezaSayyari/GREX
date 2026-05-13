@@ -58,6 +58,12 @@ sudo bash install.sh
 sudo bash setup.sh
 ```
 
+Or open the interactive manager after installation:
+
+```bash
+sudo grex
+```
+
 The wizard configures:
 
 - VPS public IP
@@ -264,17 +270,28 @@ sudo systemctl enable --now dnsmasq
 
 ## Management
 
-Use the `grex` shortcut for service lifecycle and diagnostics:
+Run `sudo grex` to open the interactive CLI dashboard.
 
 ```bash
-sudo grex enable
-sudo grex start
-sudo grex status
-sudo grex logs
+sudo grex
+```
+
+From the menu you can:
+
+- Configure Egress System (Wizard)
+- Activate Egress System
+- Deactivate Egress System
+- Health Check
+- Logs
+
+Command-line aliases still work too:
+
+```bash
+sudo grex configure
+sudo grex activate
+sudo grex deactivate
 sudo grex health
-sudo grex check
-sudo grex stop
-sudo grex disable
+sudo grex logs
 ```
 
 ---
