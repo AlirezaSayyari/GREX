@@ -17,6 +17,36 @@ save_iptables_rules() {
     fi
 }
 
+delete_tunnel_if_exists() {
+    local tunnel_name=$1
+
+    if [ -n "$tunnel_name" ] && ip link show "$tunnel_name" >/dev/null 2>&1; then
+        ip link del "$tunnel_name" 2>/dev/null || true
+    fi
+}
+
+cleanup_existing_tunnels() {
+    local gre_if_var
+    local gre_if
+    local link_path
+    local link_name
+
+    for ((i=1; i<=NUM_TUNNELS; i++)); do
+        gre_if_var="TUNNEL_${i}_GRE_IF"
+        eval gre_if=\$$gre_if_var
+        delete_tunnel_if_exists "$gre_if"
+    done
+
+    for link_path in /sys/class/net/*; do
+        link_name=${link_path##*/}
+        case "$link_name" in
+            gre-forti[0-9]*|*_GRE_IF)
+                delete_tunnel_if_exists "$link_name"
+                ;;
+        esac
+    done
+}
+
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "Configuration file $CONFIG_FILE not found. Run setup.sh first."
     exit 1
@@ -25,11 +55,7 @@ fi
 source "$CONFIG_FILE"
 
 # Clean up existing tunnels
-for ((i=1; i<=NUM_TUNNELS; i++)); do
-    gre_if_var="TUNNEL_${i}_GRE_IF"
-    eval gre_if=\$$gre_if_var
-    ip link del "$gre_if" 2>/dev/null || true
-done
+cleanup_existing_tunnels
 
 # Create GRE tunnels
 echo "Creating GRE tunnels..."
@@ -40,7 +66,7 @@ for ((i=1; i<=NUM_TUNNELS; i++)); do
     eval vps_ip=\$$vps_ip_var
     
     echo "Creating tunnel $i: $gre_if"
-    ip tunnel add "$gre_if" mode gre \
+    ip tunnel add name "$gre_if" mode gre \
       local "$VPS_PUBLIC_IP" \
       remote "$FORTI_PUBLIC_IP" \
       ttl 255 \
