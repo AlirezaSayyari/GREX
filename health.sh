@@ -35,7 +35,14 @@ for ((i=1; i<=NUM_TUNNELS; i++)); do
 done
 
 # Check routes
-ROUTE_COUNT=$(ip route show | grep -c "$GRE_IF")
+ROUTE_COUNT=0
+for ((i=1; i<=NUM_TUNNELS; i++)); do
+    gre_if_var="TUNNEL_${i}_GRE_IF"
+    eval gre_if=\$$gre_if_var
+    count=$(ip route show | grep -c "$gre_if" || true)
+    ROUTE_COUNT=$((ROUTE_COUNT + count))
+done
+
 if [ "$ROUTE_COUNT" -eq 0 ]; then
     STATUS="WARNING"
     ISSUES+=("No routes configured via tunnel")

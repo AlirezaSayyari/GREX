@@ -144,15 +144,18 @@ for ((i=1; i<=NUM_TUNNELS; i++)); do
     default_vps_ip="10.10.${base_ip}.2/30"
     default_forti_ip="10.10.${base_ip}.1"
     default_gre_if="gre-forti${i}"
+    vps_ip_var="TUNNEL_${i}_VPS_IP"
+    forti_ip_var="TUNNEL_${i}_FORTI_IP"
+    gre_if_var="TUNNEL_${i}_GRE_IF"
     
-    prompt TUNNEL_${i}_VPS_IP "Tunnel $i VPS IP with mask" "$default_vps_ip"
-    prompt TUNNEL_${i}_FORTI_IP "Tunnel $i FortiGate IP" "$default_forti_ip"
-    prompt TUNNEL_${i}_GRE_IF "Tunnel $i GRE interface" "$default_gre_if"
+    prompt "$vps_ip_var" "Tunnel $i VPS IP with mask" "$default_vps_ip"
+    prompt "$forti_ip_var" "Tunnel $i FortiGate IP" "$default_forti_ip"
+    prompt "$gre_if_var" "Tunnel $i GRE interface" "$default_gre_if"
     
     cat >> /etc/gre-tunnel.conf << EOF
-TUNNEL_${i}_VPS_IP=$TUNNEL_${i}_VPS_IP
-TUNNEL_${i}_FORTI_IP=$TUNNEL_${i}_FORTI_IP
-TUNNEL_${i}_GRE_IF=$TUNNEL_${i}_GRE_IF
+$vps_ip_var=${!vps_ip_var}
+$forti_ip_var=${!forti_ip_var}
+$gre_if_var=${!gre_if_var}
 EOF
 done
 
