@@ -4,44 +4,51 @@
 
 set -e
 
-if [ "$EUID" -ne 0 ]; then
-    SUDO=sudo
-else
-    SUDO=:
-fi
+INSTALL_DIR="/srv/GREX"
+
+run_as_root() {
+    if [ "$EUID" -ne 0 ]; then
+        sudo "$@"
+    else
+        "$@"
+    fi
+}
 
 echo "Installing GRE Tunnel scripts..."
 
-# Copy scripts to system locations
-$SUDO cp gre-tunnel.sh /usr/local/bin/
-$SUDO cp gre-tunnel-stop.sh /usr/local/bin/
-$SUDO cp check.sh /usr/local/bin/
-$SUDO cp health.sh /usr/local/bin/
-$SUDO cp manage.sh /usr/local/bin/
-$SUDO cp setup.sh /usr/local/bin/
+run_as_root mkdir -p "$INSTALL_DIR"
+
+# Copy project files to the server install directory
+run_as_root cp gre-tunnel.sh "$INSTALL_DIR/"
+run_as_root cp gre-tunnel-stop.sh "$INSTALL_DIR/"
+run_as_root cp check.sh "$INSTALL_DIR/"
+run_as_root cp health.sh "$INSTALL_DIR/"
+run_as_root cp manage.sh "$INSTALL_DIR/"
+run_as_root cp setup.sh "$INSTALL_DIR/"
+run_as_root cp gre-tunnel.service "$INSTALL_DIR/"
+run_as_root cp gre-tunnel.conf.example "$INSTALL_DIR/"
+run_as_root cp README.md "$INSTALL_DIR/"
 
 # Make executable
-$SUDO chmod +x /usr/local/bin/gre-tunnel.sh
-$SUDO chmod +x /usr/local/bin/gre-tunnel-stop.sh
-$SUDO chmod +x /usr/local/bin/check.sh
-$SUDO chmod +x /usr/local/bin/health.sh
-$SUDO chmod +x /usr/local/bin/manage.sh
-$SUDO ln -sf /usr/local/bin/manage.sh /usr/local/bin/grex
-$SUDO ln -sf /usr/local/bin/manage.sh /usr/bin/grex
-$SUDO chmod +x /usr/local/bin/grex
-$SUDO chmod +x /usr/bin/grex
+run_as_root chmod +x "$INSTALL_DIR/gre-tunnel.sh"
+run_as_root chmod +x "$INSTALL_DIR/gre-tunnel-stop.sh"
+run_as_root chmod +x "$INSTALL_DIR/check.sh"
+run_as_root chmod +x "$INSTALL_DIR/health.sh"
+run_as_root chmod +x "$INSTALL_DIR/manage.sh"
+run_as_root chmod +x "$INSTALL_DIR/setup.sh"
 
-# Create robust wrapper in /usr/bin/grex in case symlink path issues occur
-$SUDO bash -c 'cat > /usr/bin/grex << "EOF"
+# Create the grex command in a PATH that sudo normally keeps.
+run_as_root bash -c 'cat > /usr/bin/grex << "EOF"
 #!/bin/bash
-exec /usr/local/bin/manage.sh "$@"
+exec /srv/GREX/manage.sh "$@"
 EOF'
-$SUDO chmod +x /usr/bin/grex
+run_as_root chmod +x /usr/bin/grex
 
 # Copy service file
-$SUDO cp gre-tunnel.service /etc/systemd/system/
+run_as_root cp "$INSTALL_DIR/gre-tunnel.service" /etc/systemd/system/
 
-$SUDO systemctl daemon-reload
+run_as_root systemctl daemon-reload
 
 echo "Installation complete."
-echo "Run 'sudo grex' to manage the tunnel service or 'sudo bash setup.sh' to configure."
+echo "Installed to $INSTALL_DIR."
+echo "Run 'sudo grex' to manage the tunnel service or 'sudo grex configure' to configure."

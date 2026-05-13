@@ -71,13 +71,7 @@ echo "Enabling IP forwarding..."
 sysctl -w net.ipv4.ip_forward=1
 echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
 
-# Create systemd service
-echo "Creating systemd service..."
-sudo cp gre-tunnel.service /etc/systemd/system/
-sudo cp gre-tunnel.sh /usr/local/bin/
-sudo cp gre-tunnel-stop.sh /usr/local/bin/
-sudo chmod +x /usr/local/bin/gre-tunnel.sh
-sudo chmod +x /usr/local/bin/gre-tunnel-stop.sh
+systemctl daemon-reload
 
 if [[ "$ENABLE_DNSMASQ" =~ ^(yes|y|Y)$ ]]; then
     # Configure dnsmasq

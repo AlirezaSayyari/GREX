@@ -26,7 +26,7 @@ activate() {
         echo "Configuration not found. Run 'sudo grex configure' first."
         exit 1
     fi
-    sudo /usr/local/bin/gre-tunnel.sh
+    sudo "$SCRIPT_DIR/gre-tunnel.sh"
     sudo systemctl daemon-reload
     sudo systemctl enable --now gre-tunnel
     if systemctl list-unit-files | grep -q '^dnsmasq'; then
@@ -40,7 +40,7 @@ deactivate() {
     sudo systemctl stop gre-tunnel 2>/dev/null || true
     sudo systemctl disable gre-tunnel 2>/dev/null || true
     sudo systemctl disable dnsmasq 2>/dev/null || true
-    sudo /usr/local/bin/gre-tunnel-stop.sh || true
+    sudo "$SCRIPT_DIR/gre-tunnel-stop.sh" || true
     echo "GRE tunnel deactivated."
 }
 
@@ -80,7 +80,7 @@ menu() {
                 read -p "Press Enter to continue..." _
                 ;;
             5)
-                sudo /usr/local/bin/health.sh
+                sudo "$SCRIPT_DIR/health.sh"
                 read -p "Press Enter to continue..." _
                 ;;
             6)
@@ -155,10 +155,10 @@ case $COMMAND in
         sudo journalctl -u dnsmasq -n 50 --no-pager
         ;;
     health)
-        sudo /usr/local/bin/health.sh
+        sudo "$SCRIPT_DIR/health.sh"
         ;;
     check)
-        sudo /usr/local/bin/check.sh
+        sudo "$SCRIPT_DIR/check.sh"
         ;;
     *)
         usage

@@ -64,6 +64,9 @@ Or open the interactive manager after installation:
 sudo grex
 ```
 
+Bootstrap installs the project under `/srv/GREX` and creates `/usr/bin/grex`
+as the system command.
+
 The wizard configures:
 
 - VPS public IP
@@ -115,7 +118,7 @@ Key benefits:
 - `gre-tunnel.sh` — creates GRE tunnels, routes, NAT, and firewall rules
 - `gre-tunnel-stop.sh` — removes GRE tunnels and related iptables rules
 - `manage.sh` — enable/disable/start/stop/status/logs/health/check
-- `grex` — shortcut command linked to `manage.sh`
+- `grex` — shortcut command that runs `/srv/GREX/manage.sh`
 - `check.sh` — verifies tunnel interfaces, routing, NAT, and DNS
 - `health.sh` — reports health state for all tunnels
 - `gre-tunnel.service` — systemd unit for tunnel startup

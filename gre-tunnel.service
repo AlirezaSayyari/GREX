@@ -6,8 +6,8 @@ Wants=network.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/local/bin/gre-tunnel.sh
-ExecStop=/usr/local/bin/gre-tunnel-stop.sh
+ExecStart=/srv/GREX/gre-tunnel.sh
+ExecStop=/srv/GREX/gre-tunnel-stop.sh
 StandardOutput=journal
 StandardError=journal
 

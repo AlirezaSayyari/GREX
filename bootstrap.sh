@@ -7,6 +7,14 @@ REPO_NAME="GREX"
 BRANCH="main"
 TMPDIR=$(mktemp -d)
 
+run_as_root() {
+    if [ "$EUID" -ne 0 ]; then
+        sudo "$@"
+    else
+        "$@"
+    fi
+}
+
 cleanup() {
     rm -rf "$TMPDIR"
 }
@@ -36,17 +44,11 @@ fi
 
 cd "$REPO_DIR"
 
-if [ "$EUID" -ne 0 ]; then
-    SUDO=sudo
-else
-    SUDO=:
-fi
-
 echo "Installing GRE Tunnel helper scripts..."
-$SUDO bash install.sh
+run_as_root bash install.sh
 
 echo "Running setup wizard..."
-$SUDO bash setup.sh
+run_as_root bash setup.sh
 
 echo "Bootstrap complete."
 echo "If you need the helper manager later, run: sudo grex"
