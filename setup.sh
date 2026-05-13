@@ -8,13 +8,19 @@ set -e
 echo "🟣 Controlled Egress GRE Tunnel Setup Wizard"
 echo "============================================"
 
+INPUT_DEVICE="/dev/stdin"
+if [ ! -t 0 ] && [ -r /dev/tty ]; then
+    INPUT_DEVICE="/dev/tty"
+fi
+
 # Function to prompt for input
 prompt() {
     local var_name=$1
     local prompt_text=$2
     local default_value=$3
-    read -p "$prompt_text [$default_value]: " input
-    eval $var_name="${input:-$default_value}"
+    local input
+    read -r -p "$prompt_text [$default_value]: " input < "$INPUT_DEVICE"
+    printf -v "$var_name" "%s" "${input:-$default_value}"
 }
 
 # Collect configuration

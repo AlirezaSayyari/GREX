@@ -48,7 +48,11 @@ echo "Installing GRE Tunnel helper scripts..."
 run_as_root bash install.sh
 
 echo "Running setup wizard..."
-run_as_root bash setup.sh
+if [ -r /dev/tty ]; then
+    run_as_root bash setup.sh </dev/tty
+else
+    run_as_root bash setup.sh
+fi
 
 echo "Bootstrap complete."
 echo "If you need the helper manager later, run: sudo grex"
