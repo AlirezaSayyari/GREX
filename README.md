@@ -40,6 +40,16 @@ curl -fsSL https://raw.githubusercontent.com/AlirezaSayyari/GREX/main/bootstrap.
 
 ### 2. Install required utilities
 
+The bootstrap wizard installs these automatically. If you prefer to install
+them manually first, use the command for your distribution.
+
+For Ubuntu / Debian:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y curl dnsmasq iptables
+```
+
 For Rocky Linux / CentOS:
 
 ```bash

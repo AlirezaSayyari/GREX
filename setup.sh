@@ -23,6 +23,37 @@ prompt() {
     printf -v "$var_name" "%s" "${input:-$default_value}"
 }
 
+install_dependencies() {
+    local packages
+
+    if [[ "$ENABLE_DNSMASQ" =~ ^(yes|y|Y)$ ]]; then
+        packages=(dnsmasq iptables)
+    else
+        packages=(iptables)
+    fi
+
+    if command -v apt-get >/dev/null 2>&1; then
+        apt-get update
+        DEBIAN_FRONTEND=noninteractive apt-get install -y "${packages[@]}"
+    elif command -v dnf >/dev/null 2>&1; then
+        if [[ "$ENABLE_DNSMASQ" =~ ^(yes|y|Y)$ ]]; then
+            dnf install -y dnsmasq iptables-services
+        else
+            dnf install -y iptables-services
+        fi
+    elif command -v yum >/dev/null 2>&1; then
+        if [[ "$ENABLE_DNSMASQ" =~ ^(yes|y|Y)$ ]]; then
+            yum install -y dnsmasq iptables-services
+        else
+            yum install -y iptables-services
+        fi
+    else
+        echo "Unsupported Linux distribution: apt-get, dnf, or yum was not found."
+        echo "Install dnsmasq and iptables manually, then run 'sudo grex configure' again."
+        exit 1
+    fi
+}
+
 # Collect configuration
 echo "Please provide the following configuration details:"
 echo
@@ -66,11 +97,7 @@ echo "Configuration saved to /etc/gre-tunnel.conf"
 
 # Install dependencies
 echo "Installing dependencies..."
-if [[ "$ENABLE_DNSMASQ" =~ ^(yes|y|Y)$ ]]; then
-    dnf install -y dnsmasq iptables-services || yum install -y dnsmasq iptables-services
-else
-    dnf install -y iptables-services || yum install -y iptables-services
-fi
+install_dependencies
 
 # Enable IP forwarding
 echo "Enabling IP forwarding..."

@@ -7,6 +7,16 @@ set -e
 
 CONFIG_FILE="/etc/gre-tunnel.conf"
 
+save_iptables_rules() {
+    if [ -d /etc/sysconfig ]; then
+        iptables-save > /etc/sysconfig/iptables
+    elif [ -d /etc/iptables ]; then
+        iptables-save > /etc/iptables/rules.v4
+    else
+        echo "No persistent iptables rules directory found; rules will be reapplied when gre-tunnel starts."
+    fi
+}
+
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "Configuration file $CONFIG_FILE not found. Run setup.sh first."
     exit 1
@@ -79,6 +89,6 @@ iptables -I INPUT -p 47 -s "$FORTI_PUBLIC_IP" -j ACCEPT 2>/dev/null || true
 
 # Persist iptables
 echo "Saving iptables rules..."
-iptables-save > /etc/sysconfig/iptables
+save_iptables_rules
 
 echo "GRE tunnels setup complete."
