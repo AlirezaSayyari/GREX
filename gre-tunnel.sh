@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # GRE Tunnel Setup Script
-# This script sets up multiple GRE tunnels, routing, NAT, and iptables rules
+# This script sets up one GRE tunnel, routing, NAT, and iptables rules
 
 set -e
 
@@ -32,6 +32,7 @@ delete_tunnel_if_exists() {
     local tunnel_name=$1
 
     if [ -n "$tunnel_name" ] && ip link show "$tunnel_name" >/dev/null 2>&1; then
+        echo "Removing existing tunnel interface: $tunnel_name"
         ip link del "$tunnel_name" 2>/dev/null || true
     fi
 }
@@ -39,6 +40,12 @@ delete_tunnel_if_exists() {
 get_config_value() {
     local var_name=$1
     printf "%s" "${!var_name}"
+}
+
+normalize_config() {
+    VPS_TUNNEL_IP=${VPS_TUNNEL_IP:-${TUNNEL_1_VPS_IP:-}}
+    FORTI_TUNNEL_IP=${FORTI_TUNNEL_IP:-${TUNNEL_1_FORTI_IP:-}}
+    GRE_IF=${GRE_IF:-${TUNNEL_1_GRE_IF:-gre-forti1}}
 }
 
 trim() {
@@ -59,22 +66,34 @@ require_config_value() {
     fi
 }
 
-cleanup_existing_tunnels() {
-    local gre_if_var
-    local gre_if
+delete_conflicting_gre_tunnel() {
+    local tunnel_key=$1
+    local line
+    local tunnel_name
+
+    while IFS= read -r line; do
+        tunnel_name=${line%%:*}
+        [ -n "$tunnel_name" ] || continue
+        [ "$tunnel_name" != "gre0" ] || continue
+
+        if [[ "$line" == *"remote $FORTI_PUBLIC_IP"* ]] &&
+           [[ "$line" == *"local $VPS_PUBLIC_IP"* ]] &&
+           [[ "$line" == *"key $tunnel_key"* ]]; then
+            delete_tunnel_if_exists "$tunnel_name"
+        fi
+    done < <(ip tunnel show 2>/dev/null || true)
+}
+
+cleanup_existing_tunnel() {
     local link_path
     local link_name
 
-    for ((i=1; i<=NUM_TUNNELS; i++)); do
-        gre_if_var="TUNNEL_${i}_GRE_IF"
-        gre_if=$(get_config_value "$gre_if_var")
-        delete_tunnel_if_exists "$gre_if"
-    done
+    delete_tunnel_if_exists "$GRE_IF"
 
     for link_path in /sys/class/net/*; do
         link_name=${link_path##*/}
         case "$link_name" in
-            gre-forti[0-9]*|grex[0-9]*|*_GRE_IF)
+            gre-forti*|grex*|*_GRE_IF)
                 delete_tunnel_if_exists "$link_name"
                 ;;
         esac
@@ -93,20 +112,11 @@ validate_config() {
 
     require_config_value "VPS_PUBLIC_IP"
     require_config_value "FORTI_PUBLIC_IP"
-    require_config_value "NUM_TUNNELS"
     require_config_value "INTERNAL_SUBNETS"
     require_config_value "ETH_INTERFACE"
-
-    if ! [[ "$NUM_TUNNELS" =~ ^[1-9][0-9]*$ ]]; then
-        echo "NUM_TUNNELS must be a positive integer." >&2
-        exit 1
-    fi
-
-    for ((i=1; i<=NUM_TUNNELS; i++)); do
-        require_config_value "TUNNEL_${i}_GRE_IF"
-        require_config_value "TUNNEL_${i}_VPS_IP"
-        require_config_value "TUNNEL_${i}_FORTI_IP"
-    done
+    require_config_value "VPS_TUNNEL_IP"
+    require_config_value "FORTI_TUNNEL_IP"
+    require_config_value "GRE_IF"
 }
 
 delete_rule_if_exists() {
@@ -133,45 +143,33 @@ if [ ! -f "$CONFIG_FILE" ]; then
 fi
 
 source "$CONFIG_FILE"
+normalize_config
 validate_config
 
-# Clean up existing tunnels
-cleanup_existing_tunnels
+# Clean up existing tunnel
+cleanup_existing_tunnel
 
-# Create GRE tunnels
-echo "Creating GRE tunnels..."
-for ((i=1; i<=NUM_TUNNELS; i++)); do
-    gre_if_var="TUNNEL_${i}_GRE_IF"
-    gre_if=$(get_config_value "$gre_if_var")
-    vps_ip_var="TUNNEL_${i}_VPS_IP"
-    vps_ip=$(get_config_value "$vps_ip_var")
-    
-    echo "Creating tunnel $i: $gre_if"
-    ip link add "$gre_if" type gre \
-      local "$VPS_PUBLIC_IP" \
-      remote "$FORTI_PUBLIC_IP" \
-      ttl 255 \
-      key "$i"
-    
-    ip addr add "$vps_ip" dev "$gre_if"
-    ip link set "$gre_if" mtu 1476
-    ip link set "$gre_if" up
-done
+# Create GRE tunnel
+echo "Creating GRE tunnel: $GRE_IF"
+delete_conflicting_gre_tunnel "1"
+ip link add "$GRE_IF" type gre \
+  local "$VPS_PUBLIC_IP" \
+  remote "$FORTI_PUBLIC_IP" \
+  ttl 255 \
+  key "1"
 
-# Add routes for internal subnets with load balancing
-echo "Adding routes for internal subnets with load balancing..."
+ip addr add "$VPS_TUNNEL_IP" dev "$GRE_IF"
+ip link set "$GRE_IF" mtu 1476
+ip link set "$GRE_IF" up
+
+# Add routes for internal subnets
+echo "Adding routes for internal subnets..."
 IFS=',' read -ra SUBNETS <<< "$INTERNAL_SUBNETS"
 for subnet in "${SUBNETS[@]}"; do
     subnet=$(trim "$subnet")
     [ -n "$subnet" ] || continue
 
-    route_cmd=(ip route replace "$subnet")
-    for ((i=1; i<=NUM_TUNNELS; i++)); do
-        gre_if_var="TUNNEL_${i}_GRE_IF"
-        gre_if=$(get_config_value "$gre_if_var")
-        route_cmd+=(nexthop dev "$gre_if" weight 1)
-    done
-    "${route_cmd[@]}"
+    ip route replace "$subnet" dev "$GRE_IF"
 done
 
 # NAT outbound traffic
@@ -187,13 +185,9 @@ done
 # Forward rules
 echo "Setting up forward rules..."
 setup_forward_chain
-for ((i=1; i<=NUM_TUNNELS; i++)); do
-    gre_if_var="TUNNEL_${i}_GRE_IF"
-    gre_if=$(get_config_value "$gre_if_var")
-    iptables -A "$GREX_CHAIN" -i "$gre_if" -o "$ETH_INTERFACE" -j ACCEPT
-    iptables -A "$GREX_CHAIN" -i "$ETH_INTERFACE" -o "$gre_if" \
-      -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-done
+iptables -A "$GREX_CHAIN" -i "$GRE_IF" -o "$ETH_INTERFACE" -j ACCEPT
+iptables -A "$GREX_CHAIN" -i "$ETH_INTERFACE" -o "$GRE_IF" \
+  -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 
 # Allow GRE protocol
 echo "Allowing GRE protocol..."
@@ -204,4 +198,4 @@ iptables -I INPUT -p 47 -s "$FORTI_PUBLIC_IP" -j ACCEPT
 echo "Saving iptables rules..."
 save_iptables_rules
 
-echo "GRE tunnels setup complete."
+echo "GRE tunnel setup complete."

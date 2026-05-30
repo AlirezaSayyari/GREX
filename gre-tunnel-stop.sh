@@ -29,6 +29,7 @@ delete_tunnel_if_exists() {
     local tunnel_name=$1
 
     if [ -n "$tunnel_name" ] && ip link show "$tunnel_name" >/dev/null 2>&1; then
+        echo "Removing existing tunnel interface: $tunnel_name"
         ip link del "$tunnel_name" 2>/dev/null || true
     fi
 }
@@ -36,6 +37,12 @@ delete_tunnel_if_exists() {
 get_config_value() {
     local var_name=$1
     printf "%s" "${!var_name}"
+}
+
+normalize_config() {
+    VPS_TUNNEL_IP=${VPS_TUNNEL_IP:-${TUNNEL_1_VPS_IP:-}}
+    FORTI_TUNNEL_IP=${FORTI_TUNNEL_IP:-${TUNNEL_1_FORTI_IP:-}}
+    GRE_IF=${GRE_IF:-${TUNNEL_1_GRE_IF:-gre-forti1}}
 }
 
 trim() {
@@ -57,19 +64,16 @@ delete_rule_if_exists() {
 
 if [ -f "$CONFIG_FILE" ]; then
     source "$CONFIG_FILE"
+    normalize_config
     
-    # Clean up tunnels
-    for ((i=1; i<=NUM_TUNNELS; i++)); do
-        gre_if_var="TUNNEL_${i}_GRE_IF"
-        gre_if=$(get_config_value "$gre_if_var")
-        delete_tunnel_if_exists "$gre_if"
-    done
+    # Clean up tunnel
+    delete_tunnel_if_exists "$GRE_IF"
 fi
 
 for link_path in /sys/class/net/*; do
     link_name=${link_path##*/}
     case "$link_name" in
-        gre-forti[0-9]*|grex[0-9]*|*_GRE_IF)
+        gre-forti*|grex*|*_GRE_IF)
             delete_tunnel_if_exists "$link_name"
             ;;
     esac
@@ -96,4 +100,4 @@ fi
 # Save updated rules
 save_iptables_rules
 
-echo "GRE tunnels stopped."
+echo "GRE tunnel stopped."

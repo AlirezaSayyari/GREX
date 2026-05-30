@@ -150,7 +150,6 @@ DETECTED_VPS_PUBLIC_IP=$(detect_public_ip || true)
 DETECTED_ETH_INTERFACE=$(detect_default_interface)
 prompt VPS_PUBLIC_IP "VPS Public IP" "${DETECTED_VPS_PUBLIC_IP:-130.x.x.x}"
 prompt FORTI_PUBLIC_IP "FortiGate Public IP" "93.x.x.x"
-prompt NUM_TUNNELS "Number of parallel tunnels" "2"
 prompt INTERNAL_SUBNETS "Internal subnets (comma-separated)" "192.168.0.0/16,172.16.0.0/12"
 prompt ENABLE_DNSMASQ "Enable local DNS server with dnsmasq? (yes/no)" "yes"
 if [[ "$ENABLE_DNSMASQ" =~ ^(yes|y|Y)$ ]]; then
@@ -159,37 +158,22 @@ else
     DNS_SERVERS=""
 fi
 prompt ETH_INTERFACE "Ethernet interface" "$DETECTED_ETH_INTERFACE"
+prompt VPS_TUNNEL_IP "VPS tunnel IP with mask" "10.10.10.2/30"
+prompt FORTI_TUNNEL_IP "FortiGate tunnel IP" "10.10.10.1"
+prompt GRE_IF "GRE interface" "gre-forti1"
 
 # Create config file
 cat > /etc/gre-tunnel.conf << EOF
 VPS_PUBLIC_IP=$VPS_PUBLIC_IP
 FORTI_PUBLIC_IP=$FORTI_PUBLIC_IP
-NUM_TUNNELS=$NUM_TUNNELS
 INTERNAL_SUBNETS=$INTERNAL_SUBNETS
 ENABLE_DNSMASQ=$ENABLE_DNSMASQ
 DNS_SERVERS=$DNS_SERVERS
 ETH_INTERFACE=$ETH_INTERFACE
+VPS_TUNNEL_IP=$VPS_TUNNEL_IP
+FORTI_TUNNEL_IP=$FORTI_TUNNEL_IP
+GRE_IF=$GRE_IF
 EOF
-
-for ((i=1; i<=NUM_TUNNELS; i++)); do
-    base_ip=$((10 + i - 1))
-    default_vps_ip="10.10.${base_ip}.2/30"
-    default_forti_ip="10.10.${base_ip}.1"
-    default_gre_if="gre-forti${i}"
-    vps_ip_var="TUNNEL_${i}_VPS_IP"
-    forti_ip_var="TUNNEL_${i}_FORTI_IP"
-    gre_if_var="TUNNEL_${i}_GRE_IF"
-    
-    prompt "$vps_ip_var" "Tunnel $i VPS IP with mask" "$default_vps_ip"
-    prompt "$forti_ip_var" "Tunnel $i FortiGate IP" "$default_forti_ip"
-    prompt "$gre_if_var" "Tunnel $i GRE interface" "$default_gre_if"
-    
-    cat >> /etc/gre-tunnel.conf << EOF
-$vps_ip_var=${!vps_ip_var}
-$forti_ip_var=${!forti_ip_var}
-$gre_if_var=${!gre_if_var}
-EOF
-done
 
 echo "Configuration saved to /etc/gre-tunnel.conf"
 
@@ -220,15 +204,9 @@ bind-dynamic
 no-resolv
 EOF
 
-    for ((i=1; i<=NUM_TUNNELS; i++)); do
-        gre_if_var="TUNNEL_${i}_GRE_IF"
-        gre_if=${!gre_if_var}
-        vps_ip_var="TUNNEL_${i}_VPS_IP"
-        vps_ip=${!vps_ip_var}
-        listen_ip=$(echo $vps_ip | cut -d'/' -f1)
-        echo "interface=$gre_if" >> /etc/dnsmasq.d/tunnel.conf
-        echo "listen-address=$listen_ip" >> /etc/dnsmasq.d/tunnel.conf
-    done
+    listen_ip=$(echo "$VPS_TUNNEL_IP" | cut -d'/' -f1)
+    echo "interface=$GRE_IF" >> /etc/dnsmasq.d/tunnel.conf
+    echo "listen-address=$listen_ip" >> /etc/dnsmasq.d/tunnel.conf
 
     for dns in $(echo $DNS_SERVERS | tr ',' ' '); do
         echo "server=$dns" >> /etc/dnsmasq.d/tunnel.conf

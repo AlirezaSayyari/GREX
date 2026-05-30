@@ -1,6 +1,6 @@
 # Controlled Egress GRE Tunnel
 
-Selective outbound Internet egress for FortiGate-connected LANs using multiple GRE tunnels to a Linux VPS.
+Selective outbound Internet egress for FortiGate-connected LANs using one GRE tunnel to a Linux VPS.
 
 ---
 
@@ -8,8 +8,8 @@ Selective outbound Internet egress for FortiGate-connected LANs using multiple G
 
 This repository provides a complete VPS-side implementation for:
 
-- multiple GRE tunnels from FortiGate to VPS
-- load-balanced egress routing
+- one GRE tunnel from FortiGate to VPS
+- routed egress through the VPS
 - NAT for selected internal subnets
 - optional local DNS via `dnsmasq`
 - systemd-managed service and health monitoring
@@ -28,10 +28,10 @@ but persistent service management is not available through systemd.
 Traditional proxy-based solutions break Linux systems, Docker, CI/CD, and package managers.
 This design keeps routing simple by:
 
-- sending only selected subnets through the GRE tunnels
+- sending only selected subnets through the GRE tunnel
 - NATing only at the VPS egress
 - forwarding DNS through the same tunnel path
-- using multiple GRE tunnels for throughput and resilience
+- using a single GRE tunnel for a simpler, easier-to-debug path
 
 ---
 
@@ -105,12 +105,11 @@ The wizard configures:
 
 - VPS public IP
 - FortiGate public IP
-- number of parallel GRE tunnels
 - internal subnets
 - optional local DNS server with `dnsmasq`
 - upstream DNS servers
 - Ethernet egress interface
-- per-tunnel IP and GRE interface names
+- tunnel IPs and GRE interface name
 
 The VPS public IP is auto-detected during setup and shown as the default value.
 Press Enter to accept it, or type another IP if the server is behind a special
@@ -142,7 +141,7 @@ Servers (selected subnets)
         ↓
 FortiGate (Policy-Based Routing)
         ↓
-Multiple GRE tunnels (load-balanced)
+GRE tunnel
         ↓
 VPS (NAT + DNS)
         ↓
@@ -154,7 +153,7 @@ Key benefits:
 - no proxy dependency
 - clean routing layer
 - DNS follows tunnel path
-- multiple tunnels improve throughput and redundancy
+- single-tunnel design is simpler to operate and troubleshoot
 
 ---
 
@@ -162,12 +161,12 @@ Key benefits:
 
 - `setup.sh` — interactive VPS setup wizard
 - `install.sh` — installs helper scripts and systemd unit
-- `gre-tunnel.sh` — creates GRE tunnels, routes, NAT, and firewall rules
-- `gre-tunnel-stop.sh` — removes GRE tunnels and related iptables rules
+- `gre-tunnel.sh` — creates the GRE tunnel, routes, NAT, and firewall rules
+- `gre-tunnel-stop.sh` — removes the GRE tunnel and related iptables rules
 - `manage.sh` — enable/disable/start/stop/status/logs/health/check
 - `grex` — shortcut command that runs `/srv/GREX/manage.sh`
 - `check.sh` — verifies tunnel interfaces, routing, NAT, and DNS
-- `health.sh` — reports health state for all tunnels
+- `health.sh` — reports tunnel health state
 - `gre-tunnel.service` — systemd unit for tunnel startup
 - `gre-tunnel.conf.example` — sample config
 
@@ -175,9 +174,9 @@ Key benefits:
 
 ## FortiGate Configuration
 
-### Create multiple GRE tunnels
+### Create GRE tunnel
 
-Example for 2 tunnels:
+Example:
 
 ```text
 config system gre-tunnel
@@ -186,22 +185,16 @@ config system gre-tunnel
   set remote-gw <VPS_PUBLIC_IP>
   set key 1
  next
- edit toVPS2
-  set interface wan1
-  set remote-gw <VPS_PUBLIC_IP>
-  set key 2
- next
 end
 ```
 
-Assign IPs for the Forti side:
+Assign IP for the Forti side:
 
 ```text
 toVPS1: 10.10.10.1/32
-toVPS2: 10.10.11.1/32
 ```
 
-### Load-balanced static routes
+### Static route
 
 ```text
 config router static
@@ -211,26 +204,18 @@ config router static
   set device toVPS1
   set priority 1
  next
- edit 2
-  set dst 0.0.0.0/0
-  set gateway 10.10.11.2
-  set device toVPS2
-  set priority 1
- next
 end
 ```
 
-This creates ECMP-style load balancing across multiple GRE tunnels.
-
 ### Policy-based routing
 
-Apply PBR on FortiGate so selected source subnets use the GRE tunnels.
+Apply PBR on FortiGate so selected source subnets use the GRE tunnel.
 Example:
 
 ```text
 Source: 192.168.10.1
-Outgoing Interface: toVPS1 or toVPS2
-Gateway: 10.10.10.2 or 10.10.11.2
+Outgoing Interface: toVPS1
+Gateway: 10.10.10.2
 ```
 
 ### Firewall policy
@@ -257,8 +242,6 @@ sudo ip addr add 10.10.10.2/30 dev gre-forti1
 sudo ip link set gre-forti1 mtu 1476
 sudo ip link set gre-forti1 up
 ```
-
-Repeat for additional tunnels with different keys and IPs.
 
 ### 3. Add internal routes
 
@@ -297,15 +280,13 @@ sudo sh -c 'iptables-save > /etc/sysconfig/iptables'
 
 ## DNS on VPS
 
-If DNS is enabled in the wizard, `dnsmasq` is configured automatically for each GRE interface.
+If DNS is enabled in the wizard, `dnsmasq` is configured automatically for the GRE interface.
 
 Example rule file:
 
 ```text
 interface=gre-forti1
 listen-address=10.10.10.2
-interface=gre-forti2
-listen-address=10.10.11.2
 server=1.1.1.1
 server=8.8.8.8
 ```
@@ -352,14 +333,12 @@ sudo grex logs
 
 ```bash
 tcpdump -ni gre-forti1
-tcpdump -ni gre-forti2
 ```
 
 ### DNS monitoring
 
 ```bash
 tcpdump -ni gre-forti1 port 53
-tcpdump -ni gre-forti2 port 53
 ```
 
 ### NAT and firewall inspection
@@ -391,7 +370,7 @@ Expected output:
 ## Notes
 
 - This solution is designed for environments where outbound traffic must be routed cleanly through a trusted egress VPS.
-- Multiple GRE tunnels increase throughput and resilience, but FortiGate must be configured with matching tunnel keys and IPs.
+- The FortiGate GRE tunnel must use matching key, public endpoints, and tunnel IPs.
 - Use the wizard for fast deployment; the manual section is provided for reference and troubleshooting.
 
 
@@ -403,7 +382,7 @@ Expected output:
 * Routing layer is cleaner
 * DNS must follow same path
 * GRE must be kept alive
-* Multiple tunnels increase throughput and provide redundancy
+* A single tunnel is simpler to keep reliable
 * NAT only at egress
 
 ---

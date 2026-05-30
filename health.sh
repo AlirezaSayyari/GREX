@@ -31,34 +31,29 @@ get_config_value() {
     printf "%s" "${!var_name}"
 }
 
-# Check if tunnel interfaces exist and are administratively up
-for ((i=1; i<=NUM_TUNNELS; i++)); do
-    gre_if_var="TUNNEL_${i}_GRE_IF"
-    gre_if=$(get_config_value "$gre_if_var")
-    if [ -z "$gre_if" ]; then
-        set_status "CRITICAL"
-        ISSUES+=("Tunnel $i GRE interface is not configured")
-        continue
-    fi
-    if ! ip link show "$gre_if" &>/dev/null; then
-        set_status "CRITICAL"
-        ISSUES+=("Tunnel interface $gre_if does not exist")
-        MISSING_TUNNELS=$((MISSING_TUNNELS + 1))
-    elif ! ip link show dev "$gre_if" 2>/dev/null | grep -q "<[^>]*UP"; then
-        set_status "CRITICAL"
-        ISSUES+=("Tunnel interface $gre_if is not UP")
-    fi
-done
+normalize_config() {
+    VPS_TUNNEL_IP=${VPS_TUNNEL_IP:-${TUNNEL_1_VPS_IP:-}}
+    FORTI_TUNNEL_IP=${FORTI_TUNNEL_IP:-${TUNNEL_1_FORTI_IP:-}}
+    GRE_IF=${GRE_IF:-${TUNNEL_1_GRE_IF:-gre-forti1}}
+}
+
+normalize_config
+
+# Check if tunnel interface exists and is administratively up
+if [ -z "$GRE_IF" ]; then
+    set_status "CRITICAL"
+    ISSUES+=("GRE interface is not configured")
+elif ! ip link show "$GRE_IF" &>/dev/null; then
+    set_status "CRITICAL"
+    ISSUES+=("Tunnel interface $GRE_IF does not exist")
+    MISSING_TUNNELS=1
+elif ! ip link show dev "$GRE_IF" 2>/dev/null | grep -q "<[^>]*UP"; then
+    set_status "CRITICAL"
+    ISSUES+=("Tunnel interface $GRE_IF is not UP")
+fi
 
 # Check routes
-ROUTE_COUNT=0
-for ((i=1; i<=NUM_TUNNELS; i++)); do
-    gre_if_var="TUNNEL_${i}_GRE_IF"
-    gre_if=$(get_config_value "$gre_if_var")
-    [ -n "$gre_if" ] || continue
-    count=$(ip route show | grep -c "$gre_if" || true)
-    ROUTE_COUNT=$((ROUTE_COUNT + count))
-done
+ROUTE_COUNT=$(ip route show | grep -c "$GRE_IF" || true)
 
 if [ "$ROUTE_COUNT" -eq 0 ]; then
     set_status "WARNING"
@@ -92,19 +87,13 @@ if [ -n "${FORTI_PUBLIC_IP:-}" ]; then
 fi
 
 # Check connectivity
-for ((i=1; i<=NUM_TUNNELS; i++)); do
-    forti_ip_var="TUNNEL_${i}_FORTI_IP"
-    forti_ip=$(get_config_value "$forti_ip_var")
-    if [ -z "$forti_ip" ]; then
-        set_status "CRITICAL"
-        ISSUES+=("Tunnel $i FortiGate tunnel IP is not configured")
-        continue
-    fi
-    if ! ping -c 1 -W 2 "$forti_ip" &>/dev/null; then
-        set_status "CRITICAL"
-        ISSUES+=("Cannot ping FortiGate tunnel IP for tunnel $i")
-    fi
-done
+if [ -z "$FORTI_TUNNEL_IP" ]; then
+    set_status "CRITICAL"
+    ISSUES+=("FortiGate tunnel IP is not configured")
+elif ! ping -c 1 -W 2 "$FORTI_TUNNEL_IP" &>/dev/null; then
+    set_status "CRITICAL"
+    ISSUES+=("Cannot ping FortiGate tunnel IP $FORTI_TUNNEL_IP")
+fi
 
 if [ "$MISSING_TUNNELS" -gt 0 ]; then
     NOTES+=("Run 'sudo grex activate', then check 'sudo journalctl -u gre-tunnel -n 100 --no-pager' if the tunnel interface is still missing")

@@ -27,6 +27,20 @@ dns_enabled() {
     [[ "${ENABLE_DNSMASQ:-yes}" =~ ^(yes|y|Y)$ ]]
 }
 
+show_gre_tunnel_failure() {
+    echo "gre-tunnel service failed to start."
+    echo
+    echo "=== gre-tunnel status ==="
+    run_as_root systemctl status gre-tunnel --no-pager -l 2>/dev/null || true
+    echo
+    echo "=== gre-tunnel logs ==="
+    if command -v journalctl >/dev/null 2>&1; then
+        run_as_root journalctl -u gre-tunnel -n 100 --no-pager 2>/dev/null || true
+    else
+        echo "journalctl is not available"
+    fi
+}
+
 start_dnsmasq_if_enabled() {
     dns_enabled || return 0
 
@@ -75,7 +89,10 @@ activate() {
     if has_systemd; then
         run_as_root systemctl daemon-reload
         run_as_root systemctl enable gre-tunnel
-        run_as_root systemctl restart gre-tunnel
+        if ! run_as_root systemctl restart gre-tunnel; then
+            show_gre_tunnel_failure
+            exit 1
+        fi
     else
         run_as_root "$SCRIPT_DIR/gre-tunnel.sh"
     fi

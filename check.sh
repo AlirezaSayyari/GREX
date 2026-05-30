@@ -19,22 +19,22 @@ get_config_value() {
     printf "%s" "${!var_name}"
 }
 
+normalize_config() {
+    VPS_TUNNEL_IP=${VPS_TUNNEL_IP:-${TUNNEL_1_VPS_IP:-}}
+    FORTI_TUNNEL_IP=${FORTI_TUNNEL_IP:-${TUNNEL_1_FORTI_IP:-}}
+    GRE_IF=${GRE_IF:-${TUNNEL_1_GRE_IF:-gre-forti1}}
+}
+
+normalize_config
+
 # Check tunnel interface
-echo "1. Tunnel Interfaces:"
-for ((i=1; i<=NUM_TUNNELS; i++)); do
-    gre_if_var="TUNNEL_${i}_GRE_IF"
-    gre_if=$(get_config_value "$gre_if_var")
-    ip -br a | grep "$gre_if" || echo "Tunnel interface $gre_if not found!"
-done
+echo "1. Tunnel Interface:"
+ip -br a | grep "$GRE_IF" || echo "Tunnel interface $GRE_IF not found!"
 
 # Check routes
 echo
 echo "2. Routes:"
-for ((i=1; i<=NUM_TUNNELS; i++)); do
-    gre_if_var="TUNNEL_${i}_GRE_IF"
-    gre_if=$(get_config_value "$gre_if_var")
-    ip route show | grep "$gre_if" || echo "No routes via $gre_if found!"
-done
+ip route show | grep "$GRE_IF" || echo "No routes via $GRE_IF found!"
 
 # Check NAT rules
 echo
@@ -68,12 +68,8 @@ fi
 # Check connectivity
 echo
 echo "7. Connectivity Check:"
-for ((i=1; i<=NUM_TUNNELS; i++)); do
-    forti_ip_var="TUNNEL_${i}_FORTI_IP"
-    forti_ip=$(get_config_value "$forti_ip_var")
-    if ping -c 1 -W 2 "$forti_ip" &>/dev/null; then
-        echo "Tunnel $i is reachable"
-    else
-        echo "Tunnel $i is not reachable"
-    fi
-done
+if ping -c 1 -W 2 "$FORTI_TUNNEL_IP" &>/dev/null; then
+    echo "Tunnel is reachable"
+else
+    echo "Tunnel is not reachable"
+fi
