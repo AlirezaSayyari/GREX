@@ -32,6 +32,8 @@ run_as_root cp check.sh "$INSTALL_DIR/"
 run_as_root cp health.sh "$INSTALL_DIR/"
 run_as_root cp manage.sh "$INSTALL_DIR/"
 run_as_root cp setup.sh "$INSTALL_DIR/"
+run_as_root cp install.sh "$INSTALL_DIR/"
+run_as_root cp bootstrap.sh "$INSTALL_DIR/" 2>/dev/null || true
 run_as_root cp gre-tunnel.service "$INSTALL_DIR/"
 run_as_root cp gre-tunnel.conf.example "$INSTALL_DIR/"
 run_as_root cp README.md "$INSTALL_DIR/"
@@ -43,6 +45,8 @@ run_as_root chmod +x "$INSTALL_DIR/check.sh"
 run_as_root chmod +x "$INSTALL_DIR/health.sh"
 run_as_root chmod +x "$INSTALL_DIR/manage.sh"
 run_as_root chmod +x "$INSTALL_DIR/setup.sh"
+run_as_root chmod +x "$INSTALL_DIR/install.sh"
+run_as_root chmod +x "$INSTALL_DIR/bootstrap.sh" 2>/dev/null || true
 
 # Create the grex command in a PATH that sudo normally keeps.
 run_as_root bash -c "printf '%s\n' '#!/bin/bash' 'exec /srv/GREX/manage.sh \"\$@\"' > '$BIN_DIR/grex'"

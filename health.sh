@@ -13,6 +13,8 @@ source "$CONFIG_FILE"
 
 STATUS="OK"
 ISSUES=()
+NOTES=()
+MISSING_TUNNELS=0
 
 set_status() {
     local new_status=$1
@@ -29,7 +31,7 @@ get_config_value() {
     printf "%s" "${!var_name}"
 }
 
-# Check if tunnel interfaces exist
+# Check if tunnel interfaces exist and are administratively up
 for ((i=1; i<=NUM_TUNNELS; i++)); do
     gre_if_var="TUNNEL_${i}_GRE_IF"
     gre_if=$(get_config_value "$gre_if_var")
@@ -41,15 +43,8 @@ for ((i=1; i<=NUM_TUNNELS; i++)); do
     if ! ip link show "$gre_if" &>/dev/null; then
         set_status "CRITICAL"
         ISSUES+=("Tunnel interface $gre_if does not exist")
-    fi
-done
-
-# Check if tunnels are up
-for ((i=1; i<=NUM_TUNNELS; i++)); do
-    gre_if_var="TUNNEL_${i}_GRE_IF"
-    gre_if=$(get_config_value "$gre_if_var")
-    [ -n "$gre_if" ] || continue
-    if ! ip link show dev "$gre_if" 2>/dev/null | grep -q "<[^>]*UP"; then
+        MISSING_TUNNELS=$((MISSING_TUNNELS + 1))
+    elif ! ip link show dev "$gre_if" 2>/dev/null | grep -q "<[^>]*UP"; then
         set_status "CRITICAL"
         ISSUES+=("Tunnel interface $gre_if is not UP")
     fi
@@ -87,6 +82,15 @@ if [ "$NAT_MISSING" -eq 1 ]; then
     set_status "WARNING"
 fi
 
+# Check public FortiGate reachability separately from tunnel reachability.
+if [ -n "${FORTI_PUBLIC_IP:-}" ]; then
+    if ping -c 1 -W 2 "$FORTI_PUBLIC_IP" &>/dev/null; then
+        NOTES+=("FortiGate public IP $FORTI_PUBLIC_IP responds to ICMP; this does not prove the GRE tunnel is up")
+    else
+        NOTES+=("FortiGate public IP $FORTI_PUBLIC_IP did not respond to ICMP; GRE may still work if ICMP is blocked")
+    fi
+fi
+
 # Check connectivity
 for ((i=1; i<=NUM_TUNNELS; i++)); do
     forti_ip_var="TUNNEL_${i}_FORTI_IP"
@@ -101,6 +105,10 @@ for ((i=1; i<=NUM_TUNNELS; i++)); do
         ISSUES+=("Cannot ping FortiGate tunnel IP for tunnel $i")
     fi
 done
+
+if [ "$MISSING_TUNNELS" -gt 0 ]; then
+    NOTES+=("Run 'sudo grex activate', then check 'sudo journalctl -u gre-tunnel -n 100 --no-pager' if the tunnel interface is still missing")
+fi
 
 # Check dnsmasq
 if [[ "${ENABLE_DNSMASQ:-yes}" =~ ^(yes|y|Y)$ ]]; then
@@ -129,6 +137,13 @@ if [ ${#ISSUES[@]} -gt 0 ]; then
     done
 else
     echo "All checks passed"
+fi
+
+if [ ${#NOTES[@]} -gt 0 ]; then
+    echo "Notes:"
+    for note in "${NOTES[@]}"; do
+        echo "  - $note"
+    done
 fi
 
 exit 0
