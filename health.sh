@@ -49,7 +49,7 @@ for ((i=1; i<=NUM_TUNNELS; i++)); do
     gre_if_var="TUNNEL_${i}_GRE_IF"
     gre_if=$(get_config_value "$gre_if_var")
     [ -n "$gre_if" ] || continue
-    if ! ip -br link show "$gre_if" 2>/dev/null | grep -qw "UP"; then
+    if ! ip link show dev "$gre_if" 2>/dev/null | grep -q "<[^>]*UP"; then
         set_status "CRITICAL"
         ISSUES+=("Tunnel interface $gre_if is not UP")
     fi
@@ -71,10 +71,20 @@ if [ "$ROUTE_COUNT" -eq 0 ]; then
 fi
 
 # Check NAT rules
-NAT_COUNT=$(iptables -t nat -L POSTROUTING -n | grep -c MASQUERADE)
-if [ "$NAT_COUNT" -eq 0 ]; then
+NAT_MISSING=0
+IFS=',' read -ra SUBNETS <<< "$INTERNAL_SUBNETS"
+for subnet in "${SUBNETS[@]}"; do
+    subnet="${subnet#"${subnet%%[![:space:]]*}"}"
+    subnet="${subnet%"${subnet##*[![:space:]]}"}"
+    [ -n "$subnet" ] || continue
+    if ! iptables -t nat -C POSTROUTING -s "$subnet" -o "$ETH_INTERFACE" -j MASQUERADE 2>/dev/null; then
+        NAT_MISSING=1
+        ISSUES+=("Missing NAT rule for $subnet via $ETH_INTERFACE")
+    fi
+done
+
+if [ "$NAT_MISSING" -eq 1 ]; then
     set_status "WARNING"
-    ISSUES+=("No NAT rules configured")
 fi
 
 # Check connectivity

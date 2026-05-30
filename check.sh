@@ -14,11 +14,16 @@ source "$CONFIG_FILE"
 echo "🟣 Checking GRE Tunnel Configuration"
 echo "===================================="
 
+get_config_value() {
+    local var_name=$1
+    printf "%s" "${!var_name}"
+}
+
 # Check tunnel interface
 echo "1. Tunnel Interfaces:"
 for ((i=1; i<=NUM_TUNNELS; i++)); do
     gre_if_var="TUNNEL_${i}_GRE_IF"
-    eval gre_if=\$$gre_if_var
+    gre_if=$(get_config_value "$gre_if_var")
     ip -br a | grep "$gre_if" || echo "Tunnel interface $gre_if not found!"
 done
 
@@ -27,7 +32,7 @@ echo
 echo "2. Routes:"
 for ((i=1; i<=NUM_TUNNELS; i++)); do
     gre_if_var="TUNNEL_${i}_GRE_IF"
-    eval gre_if=\$$gre_if_var
+    gre_if=$(get_config_value "$gre_if_var")
     ip route show | grep "$gre_if" || echo "No routes via $gre_if found!"
 done
 
@@ -49,11 +54,15 @@ iptables -L INPUT -n -v | grep "47" || echo "GRE protocol not allowed!"
 # Check DNS
 echo
 echo "6. DNS Configuration:"
-if systemctl is-active --quiet dnsmasq; then
-    echo "dnsmasq is running"
-    cat /etc/dnsmasq.d/tunnel.conf 2>/dev/null || echo "DNS config not found"
+if [[ "${ENABLE_DNSMASQ:-yes}" =~ ^(yes|y|Y)$ ]]; then
+    if systemctl is-active --quiet dnsmasq; then
+        echo "dnsmasq is running"
+        cat /etc/dnsmasq.d/tunnel.conf 2>/dev/null || echo "DNS config not found"
+    else
+        echo "dnsmasq is not running"
+    fi
 else
-    echo "dnsmasq is not running"
+    echo "dnsmasq is disabled in GREX config"
 fi
 
 # Check connectivity
@@ -61,7 +70,7 @@ echo
 echo "7. Connectivity Check:"
 for ((i=1; i<=NUM_TUNNELS; i++)); do
     forti_ip_var="TUNNEL_${i}_FORTI_IP"
-    eval forti_ip=\$$forti_ip_var
+    forti_ip=$(get_config_value "$forti_ip_var")
     if ping -c 1 -W 2 "$forti_ip" &>/dev/null; then
         echo "Tunnel $i is reachable"
     else

@@ -27,9 +27,9 @@ activate() {
         exit 1
     fi
     source "$CONFIG_FILE"
-    sudo "$SCRIPT_DIR/gre-tunnel.sh"
     sudo systemctl daemon-reload
-    sudo systemctl enable --now gre-tunnel
+    sudo systemctl enable gre-tunnel
+    sudo systemctl restart gre-tunnel
     if [[ "${ENABLE_DNSMASQ:-yes}" =~ ^(yes|y|Y)$ ]] && systemctl list-unit-files | grep -q '^dnsmasq'; then
         sudo systemctl enable --now dnsmasq
     fi
@@ -88,7 +88,7 @@ menu() {
                 echo "=== gre-tunnel logs ==="
                 sudo journalctl -u gre-tunnel -n 50 --no-pager
                 echo "=== dnsmasq logs ==="
-                sudo journalctl -u dnsmasq -n 50 --no-pager
+                sudo journalctl -u dnsmasq -n 50 --no-pager 2>/dev/null || echo "dnsmasq logs are not available"
                 read -p "Press Enter to continue..." _
                 ;;
             0)
@@ -126,14 +126,14 @@ case $COMMAND in
         if [ -f "$CONFIG_FILE" ]; then
             source "$CONFIG_FILE"
         fi
-        if [[ "${ENABLE_DNSMASQ:-yes}" =~ ^(yes|y|Y)$ ]]; then
+        if [[ "${ENABLE_DNSMASQ:-yes}" =~ ^(yes|y|Y)$ ]] && systemctl list-unit-files | grep -q '^dnsmasq'; then
             sudo systemctl enable dnsmasq
         fi
         echo "GRE tunnel service enabled"
         ;;
     disable)
         sudo systemctl disable gre-tunnel
-        sudo systemctl disable dnsmasq
+        sudo systemctl disable dnsmasq 2>/dev/null || true
         echo "GRE tunnel service disabled"
         ;;
     start)
@@ -141,13 +141,13 @@ case $COMMAND in
         if [ -f "$CONFIG_FILE" ]; then
             source "$CONFIG_FILE"
         fi
-        if [[ "${ENABLE_DNSMASQ:-yes}" =~ ^(yes|y|Y)$ ]]; then
+        if [[ "${ENABLE_DNSMASQ:-yes}" =~ ^(yes|y|Y)$ ]] && systemctl list-unit-files | grep -q '^dnsmasq'; then
             sudo systemctl start dnsmasq
         fi
         echo "GRE tunnel started"
         ;;
     stop)
-        sudo systemctl stop dnsmasq
+        sudo systemctl stop dnsmasq 2>/dev/null || true
         sudo systemctl stop gre-tunnel
         echo "GRE tunnel stopped"
         ;;
@@ -156,14 +156,14 @@ case $COMMAND in
         sudo systemctl status gre-tunnel --no-pager -l
         echo
         echo "DNS Service Status:"
-        sudo systemctl status dnsmasq --no-pager -l
+        sudo systemctl status dnsmasq --no-pager -l 2>/dev/null || echo "dnsmasq is not installed or not available"
         ;;
     logs)
         echo "GRE Tunnel Logs:"
         sudo journalctl -u gre-tunnel -n 50 --no-pager
         echo
         echo "DNS Logs:"
-        sudo journalctl -u dnsmasq -n 50 --no-pager
+        sudo journalctl -u dnsmasq -n 50 --no-pager 2>/dev/null || echo "dnsmasq logs are not available"
         ;;
     health)
         sudo "$SCRIPT_DIR/health.sh"

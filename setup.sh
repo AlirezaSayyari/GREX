@@ -126,7 +126,11 @@ prompt FORTI_PUBLIC_IP "FortiGate Public IP" "93.x.x.x"
 prompt NUM_TUNNELS "Number of parallel tunnels" "2"
 prompt INTERNAL_SUBNETS "Internal subnets (comma-separated)" "192.168.0.0/16,172.16.0.0/12"
 prompt ENABLE_DNSMASQ "Enable local DNS server with dnsmasq? (yes/no)" "yes"
-prompt DNS_SERVERS "Upstream DNS servers (comma-separated)" "1.1.1.1,8.8.8.8"
+if [[ "$ENABLE_DNSMASQ" =~ ^(yes|y|Y)$ ]]; then
+    prompt DNS_SERVERS "Upstream DNS servers (comma-separated)" "1.1.1.1,8.8.8.8"
+else
+    DNS_SERVERS=""
+fi
 prompt ETH_INTERFACE "Ethernet interface" "eth0"
 
 # Create config file
@@ -185,9 +189,9 @@ EOF
 
     for ((i=1; i<=NUM_TUNNELS; i++)); do
         gre_if_var="TUNNEL_${i}_GRE_IF"
-        eval gre_if=\$$gre_if_var
+        gre_if=${!gre_if_var}
         vps_ip_var="TUNNEL_${i}_VPS_IP"
-        eval vps_ip=\$$vps_ip_var
+        vps_ip=${!vps_ip_var}
         listen_ip=$(echo $vps_ip | cut -d'/' -f1)
         echo "interface=$gre_if" >> /etc/dnsmasq.d/tunnel.conf
         echo "listen-address=$listen_ip" >> /etc/dnsmasq.d/tunnel.conf

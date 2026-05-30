@@ -97,6 +97,7 @@ network path.
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now gre-tunnel
+# Only needed if DNS was enabled in the wizard:
 sudo systemctl enable --now dnsmasq
 ```
 
@@ -219,10 +220,10 @@ sudo sysctl -p
 
 ```bash
 sudo ip link del gre-forti1 2>/dev/null
-sudo ip tunnel add gre-forti1 mode gre local <VPS_PUBLIC_IP> remote <FORTI_PUBLIC_IP> ttl 255 key 1
+sudo ip link add gre-forti1 type gre local <VPS_PUBLIC_IP> remote <FORTI_PUBLIC_IP> ttl 255 key 1
 sudo ip addr add 10.10.10.2/30 dev gre-forti1
-sudo ip link set gre-forti1 up
 sudo ip link set gre-forti1 mtu 1476
+sudo ip link set gre-forti1 up
 ```
 
 Repeat for additional tunnels with different keys and IPs.
@@ -334,6 +335,7 @@ tcpdump -ni gre-forti2 port 53
 ```bash
 sudo iptables -t nat -L -n -v
 sudo iptables -L FORWARD -n -v
+sudo iptables -L GREX-FORWARD -n -v
 ```
 
 ---
