@@ -5,6 +5,11 @@
 
 set -e
 
+if [ "$EUID" -ne 0 ]; then
+    echo "setup.sh must be run as root. Use: sudo bash setup.sh" >&2
+    exit 1
+fi
+
 echo "🟣 Controlled Egress GRE Tunnel Setup Wizard"
 echo "============================================"
 
@@ -63,13 +68,27 @@ detect_public_ip() {
     return 1
 }
 
+detect_default_interface() {
+    local iface
+
+    if command -v ip >/dev/null 2>&1; then
+        iface=$(ip route show default 2>/dev/null | awk '{print $5; exit}')
+        if [ -n "$iface" ]; then
+            printf "%s" "$iface"
+            return 0
+        fi
+    fi
+
+    printf "eth0"
+}
+
 install_dependencies() {
     local packages
 
     if [[ "$ENABLE_DNSMASQ" =~ ^(yes|y|Y)$ ]]; then
-        packages=(dnsmasq iptables)
+        packages=(curl iproute2 iptables dnsmasq)
     else
-        packages=(iptables)
+        packages=(curl iproute2 iptables)
     fi
 
     if command -v apt-get >/dev/null 2>&1; then
@@ -99,19 +118,26 @@ install_dependencies() {
         return "$status"
     elif command -v dnf >/dev/null 2>&1; then
         if [[ "$ENABLE_DNSMASQ" =~ ^(yes|y|Y)$ ]]; then
-            dnf install -y dnsmasq iptables-services
+            dnf install -y curl iproute iptables dnsmasq
         else
-            dnf install -y iptables-services
+            dnf install -y curl iproute iptables
         fi
+        dnf install -y iptables-services 2>/dev/null || true
     elif command -v yum >/dev/null 2>&1; then
         if [[ "$ENABLE_DNSMASQ" =~ ^(yes|y|Y)$ ]]; then
-            yum install -y dnsmasq iptables-services
+            yum install -y curl iproute iptables iptables-services dnsmasq
         else
-            yum install -y iptables-services
+            yum install -y curl iproute iptables iptables-services
         fi
+    elif command -v zypper >/dev/null 2>&1; then
+        zypper --non-interactive install curl iproute2 iptables "${packages[@]:3}"
+    elif command -v pacman >/dev/null 2>&1; then
+        pacman -Sy --noconfirm --needed "${packages[@]}"
+    elif command -v apk >/dev/null 2>&1; then
+        apk add --no-cache bash "${packages[@]}"
     else
-        echo "Unsupported Linux distribution: apt-get, dnf, or yum was not found."
-        echo "Install dnsmasq and iptables manually, then run 'sudo grex configure' again."
+        echo "Unsupported Linux distribution: no known package manager was found."
+        echo "Install curl, iproute2/iproute, iptables, and optionally dnsmasq manually, then run 'sudo grex configure' again."
         exit 1
     fi
 }
@@ -121,6 +147,7 @@ echo "Please provide the following configuration details:"
 echo
 
 DETECTED_VPS_PUBLIC_IP=$(detect_public_ip || true)
+DETECTED_ETH_INTERFACE=$(detect_default_interface)
 prompt VPS_PUBLIC_IP "VPS Public IP" "${DETECTED_VPS_PUBLIC_IP:-130.x.x.x}"
 prompt FORTI_PUBLIC_IP "FortiGate Public IP" "93.x.x.x"
 prompt NUM_TUNNELS "Number of parallel tunnels" "2"
@@ -131,7 +158,7 @@ if [[ "$ENABLE_DNSMASQ" =~ ^(yes|y|Y)$ ]]; then
 else
     DNS_SERVERS=""
 fi
-prompt ETH_INTERFACE "Ethernet interface" "eth0"
+prompt ETH_INTERFACE "Ethernet interface" "$DETECTED_ETH_INTERFACE"
 
 # Create config file
 cat > /etc/gre-tunnel.conf << EOF
@@ -173,9 +200,15 @@ install_dependencies
 # Enable IP forwarding
 echo "Enabling IP forwarding..."
 sysctl -w net.ipv4.ip_forward=1
-echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+if grep -q '^net.ipv4.ip_forward=' /etc/sysctl.conf 2>/dev/null; then
+    sed -i 's/^net.ipv4.ip_forward=.*/net.ipv4.ip_forward=1/' /etc/sysctl.conf
+else
+    echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+fi
 
-systemctl daemon-reload
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload 2>/dev/null || true
+fi
 
 if [[ "$ENABLE_DNSMASQ" =~ ^(yes|y|Y)$ ]]; then
     # Configure dnsmasq
@@ -203,10 +236,14 @@ EOF
 fi
 
 echo "Setup complete! Run the following commands to start:"
-echo "sudo systemctl daemon-reload"
-echo "sudo systemctl enable gre-tunnel"
-echo "sudo systemctl start gre-tunnel"
-if [[ "$ENABLE_DNSMASQ" =~ ^(yes|y|Y)$ ]]; then
-    echo "sudo systemctl enable dnsmasq"
-    echo "sudo systemctl start dnsmasq"
+if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+    echo "sudo systemctl daemon-reload"
+    echo "sudo systemctl enable gre-tunnel"
+    echo "sudo systemctl start gre-tunnel"
+    if [[ "$ENABLE_DNSMASQ" =~ ^(yes|y|Y)$ ]]; then
+        echo "sudo systemctl enable dnsmasq"
+        echo "sudo systemctl start dnsmasq"
+    fi
+else
+    echo "sudo grex activate"
 fi

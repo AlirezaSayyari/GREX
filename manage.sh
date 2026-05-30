@@ -7,6 +7,51 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="/etc/gre-tunnel.conf"
 
+run_as_root() {
+    if [ "$EUID" -ne 0 ]; then
+        if ! command -v sudo >/dev/null 2>&1; then
+            echo "This command must run as root or have sudo installed." >&2
+            exit 1
+        fi
+        sudo "$@"
+    else
+        "$@"
+    fi
+}
+
+has_systemd() {
+    command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]
+}
+
+dns_enabled() {
+    [[ "${ENABLE_DNSMASQ:-yes}" =~ ^(yes|y|Y)$ ]]
+}
+
+start_dnsmasq_if_enabled() {
+    dns_enabled || return 0
+
+    if has_systemd; then
+        if systemctl list-unit-files | grep -q '^dnsmasq'; then
+            run_as_root systemctl enable --now dnsmasq
+        fi
+    elif command -v dnsmasq >/dev/null 2>&1; then
+        if ! command -v pgrep >/dev/null 2>&1 || ! pgrep -x dnsmasq >/dev/null 2>&1; then
+            run_as_root dnsmasq --conf-file=/etc/dnsmasq.d/tunnel.conf --pid-file=/run/grex-dnsmasq.pid
+        fi
+    else
+        echo "dnsmasq is enabled in config but the dnsmasq command was not found."
+    fi
+}
+
+stop_dnsmasq_if_running() {
+    if has_systemd; then
+        run_as_root systemctl stop dnsmasq 2>/dev/null || true
+    elif [ -f /run/grex-dnsmasq.pid ]; then
+        run_as_root kill "$(cat /run/grex-dnsmasq.pid)" 2>/dev/null || true
+        run_as_root rm -f /run/grex-dnsmasq.pid
+    fi
+}
+
 usage() {
     echo "Usage: $0 {help|configure|activate|deactivate|enable|disable|start|stop|status|logs|health|check}"
     exit 1
@@ -14,7 +59,7 @@ usage() {
 
 run_configure() {
     if [ -x "$SCRIPT_DIR/setup.sh" ]; then
-        sudo bash "$SCRIPT_DIR/setup.sh"
+        run_as_root bash "$SCRIPT_DIR/setup.sh"
     else
         echo "setup.sh not found in $SCRIPT_DIR"
         exit 1
@@ -27,21 +72,25 @@ activate() {
         exit 1
     fi
     source "$CONFIG_FILE"
-    sudo systemctl daemon-reload
-    sudo systemctl enable gre-tunnel
-    sudo systemctl restart gre-tunnel
-    if [[ "${ENABLE_DNSMASQ:-yes}" =~ ^(yes|y|Y)$ ]] && systemctl list-unit-files | grep -q '^dnsmasq'; then
-        sudo systemctl enable --now dnsmasq
+    if has_systemd; then
+        run_as_root systemctl daemon-reload
+        run_as_root systemctl enable gre-tunnel
+        run_as_root systemctl restart gre-tunnel
+    else
+        run_as_root "$SCRIPT_DIR/gre-tunnel.sh"
     fi
+    start_dnsmasq_if_enabled
     echo "GRE tunnel activated."
 }
 
 deactivate() {
-    sudo systemctl stop dnsmasq 2>/dev/null || true
-    sudo systemctl stop gre-tunnel 2>/dev/null || true
-    sudo systemctl disable gre-tunnel 2>/dev/null || true
-    sudo systemctl disable dnsmasq 2>/dev/null || true
-    sudo "$SCRIPT_DIR/gre-tunnel-stop.sh" || true
+    stop_dnsmasq_if_running
+    if has_systemd; then
+        run_as_root systemctl stop gre-tunnel 2>/dev/null || true
+        run_as_root systemctl disable gre-tunnel 2>/dev/null || true
+        run_as_root systemctl disable dnsmasq 2>/dev/null || true
+    fi
+    run_as_root "$SCRIPT_DIR/gre-tunnel-stop.sh" || true
     echo "GRE tunnel deactivated."
 }
 
@@ -81,14 +130,22 @@ menu() {
                 read -p "Press Enter to continue..." _
                 ;;
             5)
-                sudo "$SCRIPT_DIR/health.sh"
+                run_as_root "$SCRIPT_DIR/health.sh"
                 read -p "Press Enter to continue..." _
                 ;;
             6)
                 echo "=== gre-tunnel logs ==="
-                sudo journalctl -u gre-tunnel -n 50 --no-pager
+                if has_systemd && command -v journalctl >/dev/null 2>&1; then
+                    run_as_root journalctl -u gre-tunnel -n 50 --no-pager
+                else
+                    echo "systemd journal is not available"
+                fi
                 echo "=== dnsmasq logs ==="
-                sudo journalctl -u dnsmasq -n 50 --no-pager 2>/dev/null || echo "dnsmasq logs are not available"
+                if has_systemd && command -v journalctl >/dev/null 2>&1; then
+                    run_as_root journalctl -u dnsmasq -n 50 --no-pager 2>/dev/null || echo "dnsmasq logs are not available"
+                else
+                    echo "dnsmasq logs are not available"
+                fi
                 read -p "Press Enter to continue..." _
                 ;;
             0)
@@ -122,54 +179,86 @@ case $COMMAND in
         deactivate
         ;;
     enable)
-        sudo systemctl enable gre-tunnel
         if [ -f "$CONFIG_FILE" ]; then
             source "$CONFIG_FILE"
         fi
-        if [[ "${ENABLE_DNSMASQ:-yes}" =~ ^(yes|y|Y)$ ]] && systemctl list-unit-files | grep -q '^dnsmasq'; then
-            sudo systemctl enable dnsmasq
+        if has_systemd; then
+            run_as_root systemctl enable gre-tunnel
+            if dns_enabled && systemctl list-unit-files | grep -q '^dnsmasq'; then
+                run_as_root systemctl enable dnsmasq
+            fi
+            echo "GRE tunnel service enabled"
+        else
+            echo "enable requires systemd; use 'sudo grex activate' to start GREX directly on this system."
         fi
-        echo "GRE tunnel service enabled"
         ;;
     disable)
-        sudo systemctl disable gre-tunnel
-        sudo systemctl disable dnsmasq 2>/dev/null || true
-        echo "GRE tunnel service disabled"
+        if has_systemd; then
+            run_as_root systemctl disable gre-tunnel
+            run_as_root systemctl disable dnsmasq 2>/dev/null || true
+            echo "GRE tunnel service disabled"
+        else
+            echo "disable requires systemd; no persistent service was disabled."
+        fi
         ;;
     start)
-        sudo systemctl start gre-tunnel
         if [ -f "$CONFIG_FILE" ]; then
             source "$CONFIG_FILE"
         fi
-        if [[ "${ENABLE_DNSMASQ:-yes}" =~ ^(yes|y|Y)$ ]] && systemctl list-unit-files | grep -q '^dnsmasq'; then
-            sudo systemctl start dnsmasq
+        if has_systemd; then
+            run_as_root systemctl start gre-tunnel
+        else
+            run_as_root "$SCRIPT_DIR/gre-tunnel.sh"
         fi
+        start_dnsmasq_if_enabled
         echo "GRE tunnel started"
         ;;
     stop)
-        sudo systemctl stop dnsmasq 2>/dev/null || true
-        sudo systemctl stop gre-tunnel
+        stop_dnsmasq_if_running
+        if has_systemd; then
+            run_as_root systemctl stop gre-tunnel
+        else
+            run_as_root "$SCRIPT_DIR/gre-tunnel-stop.sh"
+        fi
         echo "GRE tunnel stopped"
         ;;
     status)
         echo "GRE Tunnel Status:"
-        sudo systemctl status gre-tunnel --no-pager -l
+        if has_systemd; then
+            run_as_root systemctl status gre-tunnel --no-pager -l
+        else
+            run_as_root "$SCRIPT_DIR/health.sh"
+        fi
         echo
         echo "DNS Service Status:"
-        sudo systemctl status dnsmasq --no-pager -l 2>/dev/null || echo "dnsmasq is not installed or not available"
+        if has_systemd; then
+            run_as_root systemctl status dnsmasq --no-pager -l 2>/dev/null || echo "dnsmasq is not installed or not available"
+        elif command -v pgrep >/dev/null 2>&1 && pgrep -x dnsmasq >/dev/null 2>&1; then
+            echo "dnsmasq is running"
+        else
+            echo "dnsmasq is not running"
+        fi
         ;;
     logs)
         echo "GRE Tunnel Logs:"
-        sudo journalctl -u gre-tunnel -n 50 --no-pager
+        if has_systemd && command -v journalctl >/dev/null 2>&1; then
+            run_as_root journalctl -u gre-tunnel -n 50 --no-pager
+        else
+            echo "systemd journal is not available"
+        fi
         echo
         echo "DNS Logs:"
-        sudo journalctl -u dnsmasq -n 50 --no-pager 2>/dev/null || echo "dnsmasq logs are not available"
+        if has_systemd && command -v journalctl >/dev/null 2>&1; then
+            run_as_root journalctl -u dnsmasq -n 50 --no-pager 2>/dev/null || echo "dnsmasq logs are not available"
+        else
+            echo "dnsmasq logs are not available"
+        fi
         ;;
     health)
-        sudo "$SCRIPT_DIR/health.sh"
+        run_as_root "$SCRIPT_DIR/health.sh"
         ;;
     check)
-        sudo "$SCRIPT_DIR/check.sh"
+        run_as_root "$SCRIPT_DIR/check.sh"
         ;;
     *)
         usage

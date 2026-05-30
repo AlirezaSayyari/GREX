@@ -9,6 +9,10 @@ TMPDIR=$(mktemp -d)
 
 run_as_root() {
     if [ "$EUID" -ne 0 ]; then
+        if ! command -v sudo >/dev/null 2>&1; then
+            echo "Bootstrap must run as root or have sudo installed." >&2
+            exit 1
+        fi
         sudo "$@"
     else
         "$@"

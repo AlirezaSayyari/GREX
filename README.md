@@ -1,6 +1,6 @@
 # Controlled Egress GRE Tunnel
 
-Selective outbound Internet egress for FortiGate-connected LANs using multiple GRE tunnels to a Rocky Linux VPS.
+Selective outbound Internet egress for FortiGate-connected LANs using multiple GRE tunnels to a Linux VPS.
 
 ---
 
@@ -15,6 +15,11 @@ This repository provides a complete VPS-side implementation for:
 - systemd-managed service and health monitoring
 
 The goal is a stable, observable, and scalable egress path without proxies.
+
+GREX is designed for common systemd-based VPS distributions such as Ubuntu,
+Debian, Rocky, AlmaLinux, CentOS, RHEL, Fedora, openSUSE, and Arch. On
+non-systemd systems, `grex activate` can still run the tunnel scripts directly,
+but persistent service management is not available through systemd.
 
 ---
 
@@ -47,14 +52,33 @@ For Ubuntu / Debian:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y curl dnsmasq iptables
+sudo apt-get install -y curl iproute2 iptables dnsmasq
 ```
 
-For Rocky Linux / CentOS:
+For Rocky Linux / AlmaLinux / CentOS / RHEL / Fedora:
 
 ```bash
-sudo dnf install -y curl || sudo yum install -y curl
-sudo dnf install -y dnsmasq iptables-services || sudo yum install -y dnsmasq iptables-services
+sudo dnf install -y curl iproute iptables iptables-services dnsmasq
+# or on older systems:
+sudo yum install -y curl iproute iptables iptables-services dnsmasq
+```
+
+For openSUSE / SLES:
+
+```bash
+sudo zypper --non-interactive install curl iproute2 iptables dnsmasq
+```
+
+For Arch Linux:
+
+```bash
+sudo pacman -Sy --noconfirm --needed curl iproute2 iptables dnsmasq
+```
+
+For Alpine Linux:
+
+```bash
+sudo apk add --no-cache bash curl iproute2 iptables dnsmasq
 ```
 
 `curl` is required for external IP validation and diagnostic testing.
@@ -74,8 +98,8 @@ Or open the interactive manager after installation:
 sudo grex
 ```
 
-Bootstrap installs the project under `/srv/GREX` and creates `/usr/bin/grex`
-as the system command.
+Bootstrap installs the project under `/srv/GREX` and creates `grex` under
+`/usr/local/bin`, with a `/usr/bin/grex` symlink when possible.
 
 The wizard configures:
 
@@ -94,11 +118,19 @@ network path.
 
 ### 5. Start services
 
+On systemd-based distributions:
+
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now gre-tunnel
 # Only needed if DNS was enabled in the wizard:
 sudo systemctl enable --now dnsmasq
+```
+
+On non-systemd systems, start GREX directly:
+
+```bash
+sudo grex activate
 ```
 
 ---

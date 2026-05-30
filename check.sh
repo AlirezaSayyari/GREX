@@ -55,7 +55,7 @@ iptables -L INPUT -n -v | grep "47" || echo "GRE protocol not allowed!"
 echo
 echo "6. DNS Configuration:"
 if [[ "${ENABLE_DNSMASQ:-yes}" =~ ^(yes|y|Y)$ ]]; then
-    if systemctl is-active --quiet dnsmasq; then
+    if { command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ] && systemctl is-active --quiet dnsmasq; } || { command -v pgrep >/dev/null 2>&1 && pgrep -x dnsmasq >/dev/null 2>&1; }; then
         echo "dnsmasq is running"
         cat /etc/dnsmasq.d/tunnel.conf 2>/dev/null || echo "DNS config not found"
     else

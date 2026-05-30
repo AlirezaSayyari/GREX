@@ -5,9 +5,15 @@
 set -e
 
 INSTALL_DIR="/srv/GREX"
+BIN_DIR="/usr/local/bin"
+SYSTEMD_DIR="/etc/systemd/system"
 
 run_as_root() {
     if [ "$EUID" -ne 0 ]; then
+        if ! command -v sudo >/dev/null 2>&1; then
+            echo "This installer must run as root or have sudo installed." >&2
+            exit 1
+        fi
         sudo "$@"
     else
         "$@"
@@ -17,6 +23,7 @@ run_as_root() {
 echo "Installing GRE Tunnel scripts..."
 
 run_as_root mkdir -p "$INSTALL_DIR"
+run_as_root mkdir -p "$BIN_DIR"
 
 # Copy project files to the server install directory
 run_as_root cp gre-tunnel.sh "$INSTALL_DIR/"
@@ -38,16 +45,20 @@ run_as_root chmod +x "$INSTALL_DIR/manage.sh"
 run_as_root chmod +x "$INSTALL_DIR/setup.sh"
 
 # Create the grex command in a PATH that sudo normally keeps.
-run_as_root bash -c 'cat > /usr/bin/grex << "EOF"
-#!/bin/bash
-exec /srv/GREX/manage.sh "$@"
-EOF'
-run_as_root chmod +x /usr/bin/grex
+run_as_root bash -c "printf '%s\n' '#!/bin/bash' 'exec /srv/GREX/manage.sh \"\$@\"' > '$BIN_DIR/grex'"
+run_as_root chmod +x "$BIN_DIR/grex"
+
+if [ ! -e /usr/bin/grex ] && [ -d /usr/bin ]; then
+    run_as_root ln -s "$BIN_DIR/grex" /usr/bin/grex
+fi
 
 # Copy service file
-run_as_root cp "$INSTALL_DIR/gre-tunnel.service" /etc/systemd/system/
-
-run_as_root systemctl daemon-reload
+if command -v systemctl >/dev/null 2>&1 && [ -d "$SYSTEMD_DIR" ]; then
+    run_as_root cp "$INSTALL_DIR/gre-tunnel.service" "$SYSTEMD_DIR/"
+    run_as_root systemctl daemon-reload 2>/dev/null || true
+else
+    echo "systemd was not detected; grex can still run tunnels directly, but enable/start service commands require systemd."
+fi
 
 echo "Installation complete."
 echo "Installed to $INSTALL_DIR."

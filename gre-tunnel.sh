@@ -5,13 +5,23 @@
 
 set -e
 
+if [ "$EUID" -ne 0 ]; then
+    echo "gre-tunnel.sh must be run as root." >&2
+    exit 1
+fi
+
 CONFIG_FILE="/etc/gre-tunnel.conf"
 GREX_CHAIN="GREX-FORWARD"
 
 save_iptables_rules() {
-    if [ -d /etc/sysconfig ]; then
+    if command -v netfilter-persistent >/dev/null 2>&1; then
+        netfilter-persistent save || echo "Could not persist iptables rules with netfilter-persistent."
+    elif command -v service >/dev/null 2>&1 && service iptables status >/dev/null 2>&1; then
+        service iptables save || echo "Could not persist iptables rules with iptables service."
+    elif [ -d /etc/sysconfig ]; then
         iptables-save > /etc/sysconfig/iptables
     elif [ -d /etc/iptables ]; then
+        mkdir -p /etc/iptables
         iptables-save > /etc/iptables/rules.v4
     else
         echo "No persistent iptables rules directory found; rules will be reapplied when gre-tunnel starts."
@@ -72,6 +82,15 @@ cleanup_existing_tunnels() {
 }
 
 validate_config() {
+    command -v ip >/dev/null 2>&1 || {
+        echo "Missing required command: ip. Install iproute2/iproute." >&2
+        exit 1
+    }
+    command -v iptables >/dev/null 2>&1 || {
+        echo "Missing required command: iptables." >&2
+        exit 1
+    }
+
     require_config_value "VPS_PUBLIC_IP"
     require_config_value "FORTI_PUBLIC_IP"
     require_config_value "NUM_TUNNELS"

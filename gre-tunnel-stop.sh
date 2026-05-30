@@ -2,13 +2,23 @@
 
 # GRE Tunnel Stop Script
 
+if [ "$EUID" -ne 0 ]; then
+    echo "gre-tunnel-stop.sh must be run as root." >&2
+    exit 1
+fi
+
 CONFIG_FILE="/etc/gre-tunnel.conf"
 GREX_CHAIN="GREX-FORWARD"
 
 save_iptables_rules() {
-    if [ -d /etc/sysconfig ]; then
+    if command -v netfilter-persistent >/dev/null 2>&1; then
+        netfilter-persistent save || echo "Could not persist iptables rules with netfilter-persistent."
+    elif command -v service >/dev/null 2>&1 && service iptables status >/dev/null 2>&1; then
+        service iptables save || echo "Could not persist iptables rules with iptables service."
+    elif [ -d /etc/sysconfig ]; then
         iptables-save > /etc/sysconfig/iptables
     elif [ -d /etc/iptables ]; then
+        mkdir -p /etc/iptables
         iptables-save > /etc/iptables/rules.v4
     else
         echo "No persistent iptables rules directory found; rules will be reapplied when gre-tunnel starts."
