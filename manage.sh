@@ -26,10 +26,11 @@ activate() {
         echo "Configuration not found. Run 'sudo grex configure' first."
         exit 1
     fi
+    source "$CONFIG_FILE"
     sudo "$SCRIPT_DIR/gre-tunnel.sh"
     sudo systemctl daemon-reload
     sudo systemctl enable --now gre-tunnel
-    if systemctl list-unit-files | grep -q '^dnsmasq'; then
+    if [[ "${ENABLE_DNSMASQ:-yes}" =~ ^(yes|y|Y)$ ]] && systemctl list-unit-files | grep -q '^dnsmasq'; then
         sudo systemctl enable --now dnsmasq
     fi
     echo "GRE tunnel activated."
@@ -122,7 +123,12 @@ case $COMMAND in
         ;;
     enable)
         sudo systemctl enable gre-tunnel
-        sudo systemctl enable dnsmasq
+        if [ -f "$CONFIG_FILE" ]; then
+            source "$CONFIG_FILE"
+        fi
+        if [[ "${ENABLE_DNSMASQ:-yes}" =~ ^(yes|y|Y)$ ]]; then
+            sudo systemctl enable dnsmasq
+        fi
         echo "GRE tunnel service enabled"
         ;;
     disable)
@@ -132,7 +138,12 @@ case $COMMAND in
         ;;
     start)
         sudo systemctl start gre-tunnel
-        sudo systemctl start dnsmasq
+        if [ -f "$CONFIG_FILE" ]; then
+            source "$CONFIG_FILE"
+        fi
+        if [[ "${ENABLE_DNSMASQ:-yes}" =~ ^(yes|y|Y)$ ]]; then
+            sudo systemctl start dnsmasq
+        fi
         echo "GRE tunnel started"
         ;;
     stop)

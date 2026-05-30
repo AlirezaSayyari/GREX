@@ -14,12 +14,32 @@ source "$CONFIG_FILE"
 STATUS="OK"
 ISSUES=()
 
+set_status() {
+    local new_status=$1
+
+    if [ "$new_status" = "CRITICAL" ]; then
+        STATUS="CRITICAL"
+    elif [ "$new_status" = "WARNING" ] && [ "$STATUS" != "CRITICAL" ]; then
+        STATUS="WARNING"
+    fi
+}
+
+get_config_value() {
+    local var_name=$1
+    printf "%s" "${!var_name}"
+}
+
 # Check if tunnel interfaces exist
 for ((i=1; i<=NUM_TUNNELS; i++)); do
     gre_if_var="TUNNEL_${i}_GRE_IF"
-    eval gre_if=\$$gre_if_var
+    gre_if=$(get_config_value "$gre_if_var")
+    if [ -z "$gre_if" ]; then
+        set_status "CRITICAL"
+        ISSUES+=("Tunnel $i GRE interface is not configured")
+        continue
+    fi
     if ! ip link show "$gre_if" &>/dev/null; then
-        STATUS="CRITICAL"
+        set_status "CRITICAL"
         ISSUES+=("Tunnel interface $gre_if does not exist")
     fi
 done
@@ -27,9 +47,10 @@ done
 # Check if tunnels are up
 for ((i=1; i<=NUM_TUNNELS; i++)); do
     gre_if_var="TUNNEL_${i}_GRE_IF"
-    eval gre_if=\$$gre_if_var
-    if ! ip -br a | grep -q "$gre_if.*UP"; then
-        STATUS="CRITICAL"
+    gre_if=$(get_config_value "$gre_if_var")
+    [ -n "$gre_if" ] || continue
+    if ! ip -br link show "$gre_if" 2>/dev/null | grep -qw "UP"; then
+        set_status "CRITICAL"
         ISSUES+=("Tunnel interface $gre_if is not UP")
     fi
 done
@@ -38,37 +59,45 @@ done
 ROUTE_COUNT=0
 for ((i=1; i<=NUM_TUNNELS; i++)); do
     gre_if_var="TUNNEL_${i}_GRE_IF"
-    eval gre_if=\$$gre_if_var
+    gre_if=$(get_config_value "$gre_if_var")
+    [ -n "$gre_if" ] || continue
     count=$(ip route show | grep -c "$gre_if" || true)
     ROUTE_COUNT=$((ROUTE_COUNT + count))
 done
 
 if [ "$ROUTE_COUNT" -eq 0 ]; then
-    STATUS="WARNING"
+    set_status "WARNING"
     ISSUES+=("No routes configured via tunnel")
 fi
 
 # Check NAT rules
 NAT_COUNT=$(iptables -t nat -L POSTROUTING -n | grep -c MASQUERADE)
 if [ "$NAT_COUNT" -eq 0 ]; then
-    STATUS="WARNING"
+    set_status "WARNING"
     ISSUES+=("No NAT rules configured")
 fi
 
 # Check connectivity
 for ((i=1; i<=NUM_TUNNELS; i++)); do
     forti_ip_var="TUNNEL_${i}_FORTI_IP"
-    eval forti_ip=\$$forti_ip_var
+    forti_ip=$(get_config_value "$forti_ip_var")
+    if [ -z "$forti_ip" ]; then
+        set_status "CRITICAL"
+        ISSUES+=("Tunnel $i FortiGate tunnel IP is not configured")
+        continue
+    fi
     if ! ping -c 1 -W 2 "$forti_ip" &>/dev/null; then
-        STATUS="CRITICAL"
+        set_status "CRITICAL"
         ISSUES+=("Cannot ping FortiGate tunnel IP for tunnel $i")
     fi
 done
 
 # Check dnsmasq
-if ! systemctl is-active --quiet dnsmasq; then
-    STATUS="WARNING"
-    ISSUES+=("dnsmasq service is not running")
+if [[ "${ENABLE_DNSMASQ:-yes}" =~ ^(yes|y|Y)$ ]]; then
+    if ! systemctl is-active --quiet dnsmasq; then
+        set_status "WARNING"
+        ISSUES+=("dnsmasq service is not running")
+    fi
 fi
 
 # Output
