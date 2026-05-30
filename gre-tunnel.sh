@@ -45,7 +45,8 @@ get_config_value() {
 normalize_config() {
     VPS_TUNNEL_IP=${VPS_TUNNEL_IP:-${TUNNEL_1_VPS_IP:-}}
     FORTI_TUNNEL_IP=${FORTI_TUNNEL_IP:-${TUNNEL_1_FORTI_IP:-}}
-    GRE_IF=${GRE_IF:-${TUNNEL_1_GRE_IF:-gre-forti1}}
+    GRE_IF=${GRE_IF:-${TUNNEL_1_GRE_IF:-gre-forti}}
+    GRE_KEY=${GRE_KEY:-}
 }
 
 trim() {
@@ -70,15 +71,22 @@ delete_conflicting_gre_tunnel() {
     local tunnel_key=$1
     local line
     local tunnel_name
+    local key_matches
 
     while IFS= read -r line; do
         tunnel_name=${line%%:*}
         [ -n "$tunnel_name" ] || continue
         [ "$tunnel_name" != "gre0" ] || continue
 
+        if [ -n "$tunnel_key" ]; then
+            [[ "$line" == *"key $tunnel_key"* ]] && key_matches=1 || key_matches=0
+        else
+            [[ "$line" != *" key "* ]] && key_matches=1 || key_matches=0
+        fi
+
         if [[ "$line" == *"remote $FORTI_PUBLIC_IP"* ]] &&
            [[ "$line" == *"local $VPS_PUBLIC_IP"* ]] &&
-           [[ "$line" == *"key $tunnel_key"* ]]; then
+           [ "$key_matches" -eq 1 ]; then
             delete_tunnel_if_exists "$tunnel_name"
         fi
     done < <(ip tunnel show 2>/dev/null || true)
@@ -151,12 +159,12 @@ cleanup_existing_tunnel
 
 # Create GRE tunnel
 echo "Creating GRE tunnel: $GRE_IF"
-delete_conflicting_gre_tunnel "1"
-ip link add "$GRE_IF" type gre \
-  local "$VPS_PUBLIC_IP" \
-  remote "$FORTI_PUBLIC_IP" \
-  ttl 255 \
-  key "1"
+delete_conflicting_gre_tunnel "$GRE_KEY"
+gre_cmd=(ip link add "$GRE_IF" type gre local "$VPS_PUBLIC_IP" remote "$FORTI_PUBLIC_IP" ttl 255)
+if [ -n "$GRE_KEY" ]; then
+    gre_cmd+=(key "$GRE_KEY")
+fi
+"${gre_cmd[@]}"
 
 ip addr add "$VPS_TUNNEL_IP" dev "$GRE_IF"
 ip link set "$GRE_IF" mtu 1476

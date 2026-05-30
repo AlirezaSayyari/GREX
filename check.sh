@@ -22,7 +22,7 @@ get_config_value() {
 normalize_config() {
     VPS_TUNNEL_IP=${VPS_TUNNEL_IP:-${TUNNEL_1_VPS_IP:-}}
     FORTI_TUNNEL_IP=${FORTI_TUNNEL_IP:-${TUNNEL_1_FORTI_IP:-}}
-    GRE_IF=${GRE_IF:-${TUNNEL_1_GRE_IF:-gre-forti1}}
+    GRE_IF=${GRE_IF:-${TUNNEL_1_GRE_IF:-gre-forti}}
 }
 
 normalize_config

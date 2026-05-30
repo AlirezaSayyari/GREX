@@ -183,7 +183,6 @@ config system gre-tunnel
  edit toVPS1
   set interface wan1
   set remote-gw <VPS_PUBLIC_IP>
-  set key 1
  next
 end
 ```
@@ -236,18 +235,18 @@ sudo sysctl -p
 ### 2. Create a GRE tunnel
 
 ```bash
-sudo ip link del gre-forti1 2>/dev/null
-sudo ip link add gre-forti1 type gre local <VPS_PUBLIC_IP> remote <FORTI_PUBLIC_IP> ttl 255 key 1
-sudo ip addr add 10.10.10.2/30 dev gre-forti1
-sudo ip link set gre-forti1 mtu 1476
-sudo ip link set gre-forti1 up
+sudo ip link del gre-forti 2>/dev/null
+sudo ip link add gre-forti type gre local <VPS_PUBLIC_IP> remote <FORTI_PUBLIC_IP> ttl 255
+sudo ip addr add 10.10.10.2/30 dev gre-forti
+sudo ip link set gre-forti mtu 1476
+sudo ip link set gre-forti up
 ```
 
 ### 3. Add internal routes
 
 ```bash
-sudo ip route add 192.168.0.0/16 dev gre-forti1
-sudo ip route add 172.16.0.0/12 dev gre-forti1
+sudo ip route add 192.168.0.0/16 dev gre-forti
+sudo ip route add 172.16.0.0/12 dev gre-forti
 ```
 
 ### 4. Configure NAT
@@ -260,8 +259,8 @@ sudo iptables -t nat -A POSTROUTING -s 172.16.0.0/12 -o eth0 -j MASQUERADE
 ### 5. Configure forwarding
 
 ```bash
-sudo iptables -I FORWARD -i gre-forti1 -o eth0 -j ACCEPT
-sudo iptables -I FORWARD -i eth0 -o gre-forti1 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+sudo iptables -I FORWARD -i gre-forti -o eth0 -j ACCEPT
+sudo iptables -I FORWARD -i eth0 -o gre-forti -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 ```
 
 ### 6. Allow GRE
@@ -285,7 +284,7 @@ If DNS is enabled in the wizard, `dnsmasq` is configured automatically for the G
 Example rule file:
 
 ```text
-interface=gre-forti1
+interface=gre-forti
 listen-address=10.10.10.2
 server=1.1.1.1
 server=8.8.8.8
@@ -332,13 +331,13 @@ sudo grex logs
 ### Traffic monitoring
 
 ```bash
-tcpdump -ni gre-forti1
+tcpdump -ni gre-forti
 ```
 
 ### DNS monitoring
 
 ```bash
-tcpdump -ni gre-forti1 port 53
+tcpdump -ni gre-forti port 53
 ```
 
 ### NAT and firewall inspection

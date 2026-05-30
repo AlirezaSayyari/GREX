@@ -160,7 +160,8 @@ fi
 prompt ETH_INTERFACE "Ethernet interface" "$DETECTED_ETH_INTERFACE"
 prompt VPS_TUNNEL_IP "VPS tunnel IP with mask" "10.10.10.2/30"
 prompt FORTI_TUNNEL_IP "FortiGate tunnel IP" "10.10.10.1"
-prompt GRE_IF "GRE interface" "gre-forti1"
+prompt GRE_IF "GRE interface" "gre-forti"
+prompt GRE_KEY "GRE key (blank for no key)" ""
 
 # Create config file
 cat > /etc/gre-tunnel.conf << EOF
@@ -173,6 +174,7 @@ ETH_INTERFACE=$ETH_INTERFACE
 VPS_TUNNEL_IP=$VPS_TUNNEL_IP
 FORTI_TUNNEL_IP=$FORTI_TUNNEL_IP
 GRE_IF=$GRE_IF
+GRE_KEY=$GRE_KEY
 EOF
 
 echo "Configuration saved to /etc/gre-tunnel.conf"

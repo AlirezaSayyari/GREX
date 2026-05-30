@@ -34,7 +34,8 @@ get_config_value() {
 normalize_config() {
     VPS_TUNNEL_IP=${VPS_TUNNEL_IP:-${TUNNEL_1_VPS_IP:-}}
     FORTI_TUNNEL_IP=${FORTI_TUNNEL_IP:-${TUNNEL_1_FORTI_IP:-}}
-    GRE_IF=${GRE_IF:-${TUNNEL_1_GRE_IF:-gre-forti1}}
+    GRE_IF=${GRE_IF:-${TUNNEL_1_GRE_IF:-gre-forti}}
+    GRE_KEY=${GRE_KEY:-}
 }
 
 normalize_config
@@ -84,6 +85,12 @@ if [ -n "${FORTI_PUBLIC_IP:-}" ]; then
     else
         NOTES+=("FortiGate public IP $FORTI_PUBLIC_IP did not respond to ICMP; GRE may still work if ICMP is blocked")
     fi
+fi
+
+if [ -n "$GRE_KEY" ]; then
+    NOTES+=("GRE key is set to $GRE_KEY; FortiGate must have the same 'set key $GRE_KEY'")
+else
+    NOTES+=("GRE key is disabled; FortiGate gre-tunnel should not have a 'set key' value")
 fi
 
 # Check connectivity
