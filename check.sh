@@ -51,6 +51,13 @@ echo
 echo "5. GRE Input Rule:"
 iptables -L INPUT -n -v | grep "47" || echo "GRE protocol not allowed!"
 
+echo
+echo "5b. GREX Hardening:"
+echo "INPUT policy: $(iptables -S INPUT 2>/dev/null | awk '/^-P INPUT/ {print $3}')"
+echo "FORWARD policy: $(iptables -S FORWARD 2>/dev/null | awk '/^-P FORWARD/ {print $3}')"
+iptables -L GREX-INPUT -n -v 2>/dev/null || echo "GREX-INPUT chain not found"
+iptables -t mangle -L GREX-MANGLE -n -v 2>/dev/null || echo "GREX-MANGLE chain not found"
+
 # Check DNS
 echo
 echo "6. DNS Configuration:"

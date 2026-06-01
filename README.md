@@ -110,6 +110,8 @@ The wizard configures:
 - upstream DNS servers
 - Ethernet egress interface
 - tunnel IPs and GRE interface name
+- optional VPS firewall hardening
+- admin SSH source IP or CIDR when hardening is enabled
 
 The VPS public IP is auto-detected during setup and shown as the default value.
 Press Enter to accept it, or type another IP if the server is behind a special
@@ -259,17 +261,59 @@ sudo iptables -t nat -A POSTROUTING -s 172.16.0.0/12 -o eth0 -j MASQUERADE
 ### 5. Configure forwarding
 
 ```bash
+sudo iptables -N GREX-FORWARD 2>/dev/null || true
+sudo iptables -I FORWARD 1 -j GREX-FORWARD
+sudo iptables -A GREX-FORWARD -i gre-forti -o eth0 -j ACCEPT
+sudo iptables -A GREX-FORWARD -i eth0 -o gre-forti -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+sudo iptables -t mangle -N GREX-MANGLE 2>/dev/null || true
+sudo iptables -t mangle -I FORWARD 1 -j GREX-MANGLE
+sudo iptables -t mangle -A GREX-MANGLE -i gre-forti -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+sudo iptables -t mangle -A GREX-MANGLE -o gre-forti -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+```
+
+### 6. Harden VPS input and default forwarding
+
+Replace `<ADMIN_IP_OR_CIDR>` before applying these rules. Add allow rules first,
+then set default policies to avoid locking yourself out.
+
+```bash
+sudo iptables -N GREX-INPUT 2>/dev/null || true
+sudo iptables -I INPUT 1 -j GREX-INPUT
+sudo iptables -A GREX-INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+sudo iptables -A GREX-INPUT -i lo -j ACCEPT
+sudo iptables -A GREX-INPUT -p icmp -j ACCEPT
+sudo iptables -A GREX-INPUT -p 47 -s <FORTI_PUBLIC_IP> -j ACCEPT
+sudo iptables -A GREX-INPUT -p tcp --dport 22 -s <ADMIN_IP_OR_CIDR> -m conntrack --ctstate NEW -j ACCEPT
+sudo iptables -P INPUT DROP
+sudo iptables -P FORWARD DROP
+sudo iptables -P OUTPUT ACCEPT
+```
+
+If DNS is enabled on the VPS, also allow DNS on the GRE interface:
+
+```bash
+sudo iptables -A GREX-INPUT -i gre-forti -p udp --dport 53 -j ACCEPT
+sudo iptables -A GREX-INPUT -i gre-forti -p tcp --dport 53 -j ACCEPT
+```
+
+GREX applies these hardening rules automatically when enabled in the wizard.
+
+### 7. Minimal non-hardened forwarding
+
+If hardening is disabled, the minimal direct forwarding rules are:
+
+```bash
 sudo iptables -I FORWARD -i gre-forti -o eth0 -j ACCEPT
 sudo iptables -I FORWARD -i eth0 -o gre-forti -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 ```
 
-### 6. Allow GRE
+### 8. Allow GRE
 
 ```bash
 sudo iptables -I INPUT -p 47 -s <FORTI_PUBLIC_IP> -j ACCEPT
 ```
 
-### 7. Persist rules
+### 9. Persist rules
 
 ```bash
 sudo sh -c 'iptables-save > /etc/sysconfig/iptables'

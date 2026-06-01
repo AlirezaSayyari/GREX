@@ -11,7 +11,9 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 CONFIG_FILE="/etc/gre-tunnel.conf"
+GREX_INPUT_CHAIN="GREX-INPUT"
 GREX_CHAIN="GREX-FORWARD"
+GREX_MANGLE_CHAIN="GREX-MANGLE"
 
 save_iptables_rules() {
     if command -v netfilter-persistent >/dev/null 2>&1; then
@@ -47,6 +49,9 @@ normalize_config() {
     FORTI_TUNNEL_IP=${FORTI_TUNNEL_IP:-${TUNNEL_1_FORTI_IP:-}}
     GRE_IF=${GRE_IF:-${TUNNEL_1_GRE_IF:-gre-forti}}
     GRE_KEY=${GRE_KEY:-}
+    ENABLE_HARDENING=${ENABLE_HARDENING:-no}
+    ADMIN_IP=${ADMIN_IP:-}
+    ALLOW_ICMP=${ALLOW_ICMP:-yes}
 }
 
 trim() {
@@ -125,6 +130,14 @@ validate_config() {
     require_config_value "VPS_TUNNEL_IP"
     require_config_value "FORTI_TUNNEL_IP"
     require_config_value "GRE_IF"
+
+    if [[ "$ENABLE_HARDENING" =~ ^(yes|y|Y)$ ]]; then
+        require_config_value "ADMIN_IP"
+        if [ "$ADMIN_IP" = "x.x.x.x" ]; then
+            echo "ADMIN_IP must be set before enabling hardening." >&2
+            exit 1
+        fi
+    fi
 }
 
 delete_rule_if_exists() {
@@ -143,6 +156,65 @@ setup_forward_chain() {
 
     delete_rule_if_exists filter FORWARD -j "$GREX_CHAIN"
     iptables -I FORWARD 1 -j "$GREX_CHAIN"
+}
+
+setup_mss_chain() {
+    iptables -t mangle -N "$GREX_MANGLE_CHAIN" 2>/dev/null || true
+    iptables -t mangle -F "$GREX_MANGLE_CHAIN"
+
+    delete_rule_if_exists mangle FORWARD -j "$GREX_MANGLE_CHAIN"
+    iptables -t mangle -I FORWARD 1 -j "$GREX_MANGLE_CHAIN"
+    iptables -t mangle -A "$GREX_MANGLE_CHAIN" -i "$GRE_IF" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+    iptables -t mangle -A "$GREX_MANGLE_CHAIN" -o "$GRE_IF" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+}
+
+append_rule_if_missing() {
+    local table=$1
+    local chain=$2
+    shift 2
+
+    iptables -t "$table" -C "$chain" "$@" 2>/dev/null || iptables -t "$table" -A "$chain" "$@"
+}
+
+insert_rule_if_missing() {
+    local table=$1
+    local chain=$2
+    local position=$3
+    shift 3
+
+    iptables -t "$table" -C "$chain" "$@" 2>/dev/null || iptables -t "$table" -I "$chain" "$position" "$@"
+}
+
+setup_input_hardening() {
+    if [[ "$ENABLE_HARDENING" =~ ^(yes|y|Y)$ ]]; then
+        iptables -N "$GREX_INPUT_CHAIN" 2>/dev/null || true
+        iptables -F "$GREX_INPUT_CHAIN"
+
+        delete_rule_if_exists filter INPUT -j "$GREX_INPUT_CHAIN"
+        iptables -I INPUT 1 -j "$GREX_INPUT_CHAIN"
+
+        append_rule_if_missing filter "$GREX_INPUT_CHAIN" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+        append_rule_if_missing filter "$GREX_INPUT_CHAIN" -i lo -j ACCEPT
+
+        if [[ "$ALLOW_ICMP" =~ ^(yes|y|Y)$ ]]; then
+            append_rule_if_missing filter "$GREX_INPUT_CHAIN" -p icmp -j ACCEPT
+        fi
+
+        append_rule_if_missing filter "$GREX_INPUT_CHAIN" -p 47 -s "$FORTI_PUBLIC_IP" -j ACCEPT
+        append_rule_if_missing filter "$GREX_INPUT_CHAIN" -p tcp --dport 22 -s "$ADMIN_IP" -m conntrack --ctstate NEW -j ACCEPT
+
+        if [[ "${ENABLE_DNSMASQ:-yes}" =~ ^(yes|y|Y)$ ]]; then
+            append_rule_if_missing filter "$GREX_INPUT_CHAIN" -i "$GRE_IF" -p udp --dport 53 -j ACCEPT
+            append_rule_if_missing filter "$GREX_INPUT_CHAIN" -i "$GRE_IF" -p tcp --dport 53 -j ACCEPT
+        fi
+
+        iptables -P INPUT DROP
+        iptables -P FORWARD DROP
+        iptables -P OUTPUT ACCEPT
+    else
+        delete_rule_if_exists filter INPUT -p 47 -s "$FORTI_PUBLIC_IP" -j ACCEPT
+        insert_rule_if_missing filter INPUT 1 -p 47 -s "$FORTI_PUBLIC_IP" -j ACCEPT
+    fi
 }
 
 if [ ! -f "$CONFIG_FILE" ]; then
@@ -193,14 +265,14 @@ done
 # Forward rules
 echo "Setting up forward rules..."
 setup_forward_chain
+setup_mss_chain
 iptables -A "$GREX_CHAIN" -i "$GRE_IF" -o "$ETH_INTERFACE" -j ACCEPT
 iptables -A "$GREX_CHAIN" -i "$ETH_INTERFACE" -o "$GRE_IF" \
   -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 
-# Allow GRE protocol
-echo "Allowing GRE protocol..."
-delete_rule_if_exists filter INPUT -p 47 -s "$FORTI_PUBLIC_IP" -j ACCEPT
-iptables -I INPUT -p 47 -s "$FORTI_PUBLIC_IP" -j ACCEPT
+# Input hardening and GRE protocol access
+echo "Setting up input firewall rules..."
+setup_input_hardening
 
 # Persist iptables
 echo "Saving iptables rules..."

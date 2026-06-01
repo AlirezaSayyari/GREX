@@ -82,6 +82,24 @@ detect_default_interface() {
     printf "eth0"
 }
 
+detect_admin_ip() {
+    local ip
+
+    ip=${SSH_CLIENT%% *}
+    if is_ipv4 "$ip"; then
+        printf "%s" "$ip"
+        return 0
+    fi
+
+    ip=${SSH_CONNECTION%% *}
+    if is_ipv4 "$ip"; then
+        printf "%s" "$ip"
+        return 0
+    fi
+
+    return 1
+}
+
 install_dependencies() {
     local packages
 
@@ -148,6 +166,7 @@ echo
 
 DETECTED_VPS_PUBLIC_IP=$(detect_public_ip || true)
 DETECTED_ETH_INTERFACE=$(detect_default_interface)
+DETECTED_ADMIN_IP=$(detect_admin_ip || true)
 prompt VPS_PUBLIC_IP "VPS Public IP" "${DETECTED_VPS_PUBLIC_IP:-130.x.x.x}"
 prompt FORTI_PUBLIC_IP "FortiGate Public IP" "93.x.x.x"
 prompt INTERNAL_SUBNETS "Internal subnets (comma-separated)" "192.168.0.0/16,172.16.0.0/12"
@@ -162,6 +181,14 @@ prompt VPS_TUNNEL_IP "VPS tunnel IP with mask" "10.10.10.2/30"
 prompt FORTI_TUNNEL_IP "FortiGate tunnel IP" "10.10.10.1"
 prompt GRE_IF "GRE interface" "gre-forti"
 prompt GRE_KEY "GRE key (blank for no key)" ""
+prompt ENABLE_HARDENING "Enable VPS firewall hardening? (yes/no)" "yes"
+if [[ "$ENABLE_HARDENING" =~ ^(yes|y|Y)$ ]]; then
+    prompt ADMIN_IP "Admin SSH source IP or CIDR" "${DETECTED_ADMIN_IP:-x.x.x.x}"
+    prompt ALLOW_ICMP "Allow ICMP/ping to VPS? (yes/no)" "yes"
+else
+    ADMIN_IP=""
+    ALLOW_ICMP="yes"
+fi
 
 # Create config file
 cat > /etc/gre-tunnel.conf << EOF
@@ -175,6 +202,9 @@ VPS_TUNNEL_IP=$VPS_TUNNEL_IP
 FORTI_TUNNEL_IP=$FORTI_TUNNEL_IP
 GRE_IF=$GRE_IF
 GRE_KEY=$GRE_KEY
+ENABLE_HARDENING=$ENABLE_HARDENING
+ADMIN_IP=$ADMIN_IP
+ALLOW_ICMP=$ALLOW_ICMP
 EOF
 
 echo "Configuration saved to /etc/gre-tunnel.conf"

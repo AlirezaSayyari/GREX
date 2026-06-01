@@ -9,6 +9,7 @@ fi
 
 CONFIG_FILE="/etc/gre-tunnel.conf"
 GREX_CHAIN="GREX-FORWARD"
+GREX_MANGLE_CHAIN="GREX-MANGLE"
 
 save_iptables_rules() {
     if command -v netfilter-persistent >/dev/null 2>&1; then
@@ -92,6 +93,10 @@ fi
 delete_rule_if_exists filter FORWARD -j "$GREX_CHAIN"
 iptables -F "$GREX_CHAIN" 2>/dev/null || true
 iptables -X "$GREX_CHAIN" 2>/dev/null || true
+
+delete_rule_if_exists mangle FORWARD -j "$GREX_MANGLE_CHAIN"
+iptables -t mangle -F "$GREX_MANGLE_CHAIN" 2>/dev/null || true
+iptables -t mangle -X "$GREX_MANGLE_CHAIN" 2>/dev/null || true
 
 if [ -n "${FORTI_PUBLIC_IP:-}" ]; then
     delete_rule_if_exists filter INPUT -p 47 -s "$FORTI_PUBLIC_IP" -j ACCEPT

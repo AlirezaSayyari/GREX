@@ -36,6 +36,7 @@ normalize_config() {
     FORTI_TUNNEL_IP=${FORTI_TUNNEL_IP:-${TUNNEL_1_FORTI_IP:-}}
     GRE_IF=${GRE_IF:-${TUNNEL_1_GRE_IF:-gre-forti}}
     GRE_KEY=${GRE_KEY:-}
+    ENABLE_HARDENING=${ENABLE_HARDENING:-no}
 }
 
 normalize_config
@@ -76,6 +77,22 @@ done
 
 if [ "$NAT_MISSING" -eq 1 ]; then
     set_status "WARNING"
+fi
+
+# Check firewall hardening state
+if [[ "$ENABLE_HARDENING" =~ ^(yes|y|Y)$ ]]; then
+    if ! iptables -C INPUT -j GREX-INPUT 2>/dev/null; then
+        set_status "WARNING"
+        ISSUES+=("Hardening is enabled but GREX-INPUT is not attached to INPUT")
+    fi
+    if [ "$(iptables -S INPUT 2>/dev/null | awk '/^-P INPUT/ {print $3}')" != "DROP" ]; then
+        set_status "WARNING"
+        ISSUES+=("Hardening is enabled but INPUT policy is not DROP")
+    fi
+    if [ "$(iptables -S FORWARD 2>/dev/null | awk '/^-P FORWARD/ {print $3}')" != "DROP" ]; then
+        set_status "WARNING"
+        ISSUES+=("Hardening is enabled but FORWARD policy is not DROP")
+    fi
 fi
 
 # Check public FortiGate reachability separately from tunnel reachability.
