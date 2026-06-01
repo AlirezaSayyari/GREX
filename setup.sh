@@ -13,6 +13,7 @@ fi
 echo "🟣 Controlled Egress GRE Tunnel Setup Wizard"
 echo "============================================"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INPUT_DEVICE="/dev/stdin"
 if [ ! -t 0 ] && [ -r /dev/tty ]; then
     INPUT_DEVICE="/dev/tty"
@@ -160,6 +161,39 @@ install_dependencies() {
     fi
 }
 
+has_systemd() {
+    command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]
+}
+
+apply_configuration() {
+    echo "Applying GREX configuration..."
+
+    if has_systemd && [ -f /etc/systemd/system/gre-tunnel.service ]; then
+        systemctl daemon-reload
+        systemctl enable gre-tunnel
+        systemctl restart gre-tunnel
+
+        if [[ "$ENABLE_DNSMASQ" =~ ^(yes|y|Y)$ ]]; then
+            systemctl enable --now dnsmasq
+        else
+            systemctl stop dnsmasq 2>/dev/null || true
+            systemctl disable dnsmasq 2>/dev/null || true
+        fi
+    elif [ -x "$SCRIPT_DIR/gre-tunnel.sh" ]; then
+        "$SCRIPT_DIR/gre-tunnel.sh"
+
+        if [[ "$ENABLE_DNSMASQ" =~ ^(yes|y|Y)$ ]] && command -v dnsmasq >/dev/null 2>&1; then
+            if ! command -v pgrep >/dev/null 2>&1 || ! pgrep -x dnsmasq >/dev/null 2>&1; then
+                dnsmasq --conf-file=/etc/dnsmasq.d/tunnel.conf --pid-file=/run/grex-dnsmasq.pid
+            fi
+        fi
+    else
+        echo "Could not apply automatically because gre-tunnel.sh was not found."
+        echo "Run 'sudo grex activate' after installation."
+        return 0
+    fi
+}
+
 # Collect configuration
 echo "Please provide the following configuration details:"
 echo
@@ -245,15 +279,6 @@ EOF
     done
 fi
 
-echo "Setup complete! Run the following commands to start:"
-if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
-    echo "sudo systemctl daemon-reload"
-    echo "sudo systemctl enable gre-tunnel"
-    echo "sudo systemctl start gre-tunnel"
-    if [[ "$ENABLE_DNSMASQ" =~ ^(yes|y|Y)$ ]]; then
-        echo "sudo systemctl enable dnsmasq"
-        echo "sudo systemctl start dnsmasq"
-    fi
-else
-    echo "sudo grex activate"
-fi
+apply_configuration
+
+echo "Setup complete. GREX configuration has been applied."

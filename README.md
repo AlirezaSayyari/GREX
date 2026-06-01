@@ -117,9 +117,14 @@ The VPS public IP is auto-detected during setup and shown as the default value.
 Press Enter to accept it, or type another IP if the server is behind a special
 network path.
 
+The wizard writes `/etc/gre-tunnel.conf` and applies the configuration
+immediately. If hardening is enabled, firewall rules are applied during the
+wizard run, so make sure the admin SSH source IP is correct.
+
 ### 5. Start services
 
-On systemd-based distributions:
+The wizard applies the configuration automatically. To start or restart later on
+systemd-based distributions:
 
 ```bash
 sudo systemctl daemon-reload

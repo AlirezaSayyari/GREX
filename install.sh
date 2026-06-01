@@ -60,6 +60,10 @@ fi
 if command -v systemctl >/dev/null 2>&1 && [ -d "$SYSTEMD_DIR" ]; then
     run_as_root cp "$INSTALL_DIR/gre-tunnel.service" "$SYSTEMD_DIR/"
     run_as_root systemctl daemon-reload 2>/dev/null || true
+    if systemctl is-active --quiet gre-tunnel 2>/dev/null && [ -f /etc/gre-tunnel.conf ]; then
+        echo "Restarting active gre-tunnel service to apply the installed version..."
+        run_as_root systemctl restart gre-tunnel
+    fi
 else
     echo "systemd was not detected; grex can still run tunnels directly, but enable/start service commands require systemd."
 fi
