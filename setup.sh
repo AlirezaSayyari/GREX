@@ -110,6 +110,10 @@ install_dependencies() {
         packages=(curl iproute2 iptables)
     fi
 
+    if [[ "$ENABLE_FAIL2BAN" =~ ^(yes|y|Y)$ ]]; then
+        packages+=(fail2ban)
+    fi
+
     if command -v apt-get >/dev/null 2>&1; then
         local policy_file="/usr/sbin/policy-rc.d"
         local created_policy=0
@@ -142,11 +146,19 @@ install_dependencies() {
             dnf install -y curl iproute iptables
         fi
         dnf install -y iptables-services 2>/dev/null || true
+        if [[ "$ENABLE_FAIL2BAN" =~ ^(yes|y|Y)$ ]]; then
+            dnf install -y epel-release 2>/dev/null || true
+            dnf install -y fail2ban
+        fi
     elif command -v yum >/dev/null 2>&1; then
         if [[ "$ENABLE_DNSMASQ" =~ ^(yes|y|Y)$ ]]; then
             yum install -y curl iproute iptables iptables-services dnsmasq
         else
             yum install -y curl iproute iptables iptables-services
+        fi
+        if [[ "$ENABLE_FAIL2BAN" =~ ^(yes|y|Y)$ ]]; then
+            yum install -y epel-release 2>/dev/null || true
+            yum install -y fail2ban
         fi
     elif command -v zypper >/dev/null 2>&1; then
         zypper --non-interactive install curl iproute2 iptables "${packages[@]:3}"
@@ -158,6 +170,46 @@ install_dependencies() {
         echo "Unsupported Linux distribution: no known package manager was found."
         echo "Install curl, iproute2/iproute, iptables, and optionally dnsmasq manually, then run 'sudo grex configure' again."
         exit 1
+    fi
+}
+
+configure_fail2ban() {
+    if ! [[ "$ENABLE_FAIL2BAN" =~ ^(yes|y|Y)$ ]]; then
+        rm -f /etc/fail2ban/jail.d/grex-sshd.local
+        if has_systemd && systemctl list-unit-files | grep -q '^fail2ban'; then
+            systemctl restart fail2ban 2>/dev/null || true
+        fi
+        return 0
+    fi
+
+    if ! command -v fail2ban-server >/dev/null 2>&1; then
+        echo "fail2ban is enabled but fail2ban-server was not found after dependency installation."
+        return 1
+    fi
+
+    mkdir -p /etc/fail2ban/jail.d
+
+    local ignore_ips
+    ignore_ips="127.0.0.1/8 ::1"
+    if [ -n "${ADMIN_IPS:-}" ]; then
+        ignore_ips="$ignore_ips ${ADMIN_IPS//,/ }"
+    fi
+
+    cat > /etc/fail2ban/jail.d/grex-sshd.local << EOF
+[sshd]
+enabled = $FAIL2BAN_SSHD_ENABLED
+port = $FAIL2BAN_SSHD_PORT
+maxretry = $FAIL2BAN_SSHD_MAXRETRY
+findtime = $FAIL2BAN_SSHD_FINDTIME
+bantime = $FAIL2BAN_SSHD_BANTIME
+ignoreip = $ignore_ips
+EOF
+
+    if has_systemd; then
+        systemctl enable --now fail2ban
+        systemctl restart fail2ban
+    elif command -v service >/dev/null 2>&1; then
+        service fail2ban restart 2>/dev/null || service fail2ban start 2>/dev/null || true
     fi
 }
 
@@ -179,6 +231,7 @@ apply_configuration() {
             systemctl stop dnsmasq 2>/dev/null || true
             systemctl disable dnsmasq 2>/dev/null || true
         fi
+        configure_fail2ban
     elif [ -x "$SCRIPT_DIR/gre-tunnel.sh" ]; then
         "$SCRIPT_DIR/gre-tunnel.sh"
 
@@ -187,6 +240,7 @@ apply_configuration() {
                 dnsmasq --conf-file=/etc/dnsmasq.d/tunnel.conf --pid-file=/run/grex-dnsmasq.pid
             fi
         fi
+        configure_fail2ban
     else
         echo "Could not apply automatically because gre-tunnel.sh was not found."
         echo "Run 'sudo grex activate' after installation."
@@ -230,6 +284,20 @@ else
     ADMIN_IPS=""
     ALLOW_ICMP="yes"
 fi
+prompt ENABLE_FAIL2BAN "Enable fail2ban for SSH? (yes/no)" "yes"
+if [[ "$ENABLE_FAIL2BAN" =~ ^(yes|y|Y)$ ]]; then
+    prompt FAIL2BAN_SSHD_ENABLED "fail2ban sshd enabled" "true"
+    prompt FAIL2BAN_SSHD_PORT "fail2ban sshd port" "22"
+    prompt FAIL2BAN_SSHD_MAXRETRY "fail2ban sshd maxretry" "3"
+    prompt FAIL2BAN_SSHD_FINDTIME "fail2ban sshd findtime" "10m"
+    prompt FAIL2BAN_SSHD_BANTIME "fail2ban sshd bantime" "1h"
+else
+    FAIL2BAN_SSHD_ENABLED=false
+    FAIL2BAN_SSHD_PORT=22
+    FAIL2BAN_SSHD_MAXRETRY=3
+    FAIL2BAN_SSHD_FINDTIME=10m
+    FAIL2BAN_SSHD_BANTIME=1h
+fi
 
 # Create config file
 cat > /etc/gre-tunnel.conf << EOF
@@ -249,6 +317,12 @@ MSS_VALUE=$MSS_VALUE
 ENABLE_HARDENING=$ENABLE_HARDENING
 ADMIN_IPS=$ADMIN_IPS
 ALLOW_ICMP=$ALLOW_ICMP
+ENABLE_FAIL2BAN=$ENABLE_FAIL2BAN
+FAIL2BAN_SSHD_ENABLED=$FAIL2BAN_SSHD_ENABLED
+FAIL2BAN_SSHD_PORT=$FAIL2BAN_SSHD_PORT
+FAIL2BAN_SSHD_MAXRETRY=$FAIL2BAN_SSHD_MAXRETRY
+FAIL2BAN_SSHD_FINDTIME=$FAIL2BAN_SSHD_FINDTIME
+FAIL2BAN_SSHD_BANTIME=$FAIL2BAN_SSHD_BANTIME
 EOF
 
 echo "Configuration saved to /etc/gre-tunnel.conf"

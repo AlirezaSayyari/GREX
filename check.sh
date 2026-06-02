@@ -27,6 +27,7 @@ normalize_config() {
     MSS_MODE=${MSS_MODE:-clamp}
     MSS_VALUE=${MSS_VALUE:-}
     ADMIN_IPS=${ADMIN_IPS:-${ADMIN_IP:-}}
+    ENABLE_FAIL2BAN=${ENABLE_FAIL2BAN:-no}
 }
 
 normalize_config
@@ -64,6 +65,18 @@ echo "Admin SSH sources: ${ADMIN_IPS:-not configured}"
 iptables -L GREX-INPUT -n -v 2>/dev/null || echo "GREX-INPUT chain not found"
 iptables -t mangle -L GREX-MANGLE -n -v 2>/dev/null || echo "GREX-MANGLE chain not found"
 echo "MSS mode: $MSS_MODE ${MSS_VALUE:-}"
+
+echo
+echo "5c. fail2ban:"
+if [[ "$ENABLE_FAIL2BAN" =~ ^(yes|y|Y)$ ]]; then
+    echo "fail2ban is enabled in GREX config"
+    cat /etc/fail2ban/jail.d/grex-sshd.local 2>/dev/null || echo "GREX fail2ban jail not found"
+    if command -v fail2ban-client >/dev/null 2>&1; then
+        fail2ban-client status sshd 2>/dev/null || true
+    fi
+else
+    echo "fail2ban is disabled in GREX config"
+fi
 
 # Check DNS
 echo

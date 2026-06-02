@@ -41,6 +41,7 @@ normalize_config() {
     MSS_VALUE=${MSS_VALUE:-}
     ENABLE_HARDENING=${ENABLE_HARDENING:-no}
     ADMIN_IPS=${ADMIN_IPS:-${ADMIN_IP:-}}
+    ENABLE_FAIL2BAN=${ENABLE_FAIL2BAN:-no}
 }
 
 normalize_config
@@ -106,6 +107,20 @@ if [[ "$ENABLE_HARDENING" =~ ^(yes|y|Y)$ ]]; then
     if [ "$(iptables -S FORWARD 2>/dev/null | awk '/^-P FORWARD/ {print $3}')" != "DROP" ]; then
         set_status "WARNING"
         ISSUES+=("Hardening is enabled but FORWARD policy is not DROP")
+    fi
+fi
+
+if [[ "$ENABLE_FAIL2BAN" =~ ^(yes|y|Y)$ ]]; then
+    if [ ! -f /etc/fail2ban/jail.d/grex-sshd.local ]; then
+        set_status "WARNING"
+        ISSUES+=("fail2ban is enabled but /etc/fail2ban/jail.d/grex-sshd.local was not found")
+    fi
+
+    if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+        if ! systemctl is-active --quiet fail2ban; then
+            set_status "WARNING"
+            ISSUES+=("fail2ban is enabled but service is not running")
+        fi
     fi
 fi
 

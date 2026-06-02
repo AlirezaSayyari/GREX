@@ -52,33 +52,33 @@ For Ubuntu / Debian:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y curl iproute2 iptables dnsmasq
+sudo apt-get install -y curl iproute2 iptables dnsmasq fail2ban
 ```
 
 For Rocky Linux / AlmaLinux / CentOS / RHEL / Fedora:
 
 ```bash
-sudo dnf install -y curl iproute iptables iptables-services dnsmasq
+sudo dnf install -y curl iproute iptables iptables-services dnsmasq fail2ban
 # or on older systems:
-sudo yum install -y curl iproute iptables iptables-services dnsmasq
+sudo yum install -y curl iproute iptables iptables-services dnsmasq fail2ban
 ```
 
 For openSUSE / SLES:
 
 ```bash
-sudo zypper --non-interactive install curl iproute2 iptables dnsmasq
+sudo zypper --non-interactive install curl iproute2 iptables dnsmasq fail2ban
 ```
 
 For Arch Linux:
 
 ```bash
-sudo pacman -Sy --noconfirm --needed curl iproute2 iptables dnsmasq
+sudo pacman -Sy --noconfirm --needed curl iproute2 iptables dnsmasq fail2ban
 ```
 
 For Alpine Linux:
 
 ```bash
-sudo apk add --no-cache bash curl iproute2 iptables dnsmasq
+sudo apk add --no-cache bash curl iproute2 iptables dnsmasq fail2ban
 ```
 
 `curl` is required for external IP validation and diagnostic testing.
@@ -113,6 +113,7 @@ The wizard configures:
 - GRE MTU and TCP MSS handling
 - optional VPS firewall hardening
 - admin SSH source IPs/CIDRs when hardening is enabled
+- optional fail2ban SSH protection
 
 The VPS public IP is auto-detected during setup and shown as the default value.
 Press Enter to accept it, or type another IP if the server is behind a special
@@ -307,6 +308,23 @@ sudo iptables -A GREX-INPUT -i gre-forti -p tcp --dport 53 -j ACCEPT
 ```
 
 GREX applies these hardening rules automatically when enabled in the wizard.
+
+### fail2ban SSH Protection
+
+When enabled in the wizard, GREX writes `/etc/fail2ban/jail.d/grex-sshd.local`
+with these defaults:
+
+```ini
+[sshd]
+enabled = true
+port = 22
+maxretry = 3
+findtime = 10m
+bantime = 1h
+```
+
+The wizard lets you edit each value and adds the configured admin SSH sources
+to `ignoreip` so your management IPs are not banned.
 
 ### 7. Minimal non-hardened forwarding
 
