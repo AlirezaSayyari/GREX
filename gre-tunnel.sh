@@ -74,6 +74,66 @@ trim() {
     printf "%s" "$value"
 }
 
+is_ipv4() {
+    local ip=$1
+    [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+
+    local IFS=.
+    local octets
+    read -r -a octets <<< "$ip"
+    for octet in "${octets[@]}"; do
+        if ((10#$octet < 0 || 10#$octet > 255)); then
+            return 1
+        fi
+    done
+
+    return 0
+}
+
+is_ipv4_cidr() {
+    local value=$1
+    local ip
+    local prefix
+
+    [[ "$value" =~ ^([^/]+)/([0-9]{1,2})$ ]] || return 1
+    ip=${BASH_REMATCH[1]}
+    prefix=${BASH_REMATCH[2]}
+    is_ipv4 "$ip" || return 1
+    [ "$prefix" -ge 0 ] && [ "$prefix" -le 32 ]
+}
+
+is_ipv4_or_cidr() {
+    is_ipv4 "$1" || is_ipv4_cidr "$1"
+}
+
+validate_ip_list() {
+    local value=$1
+    local label=$2
+    local item
+
+    IFS=',' read -ra ITEMS <<< "$value"
+    for item in "${ITEMS[@]}"; do
+        item=$(trim "$item")
+        [ -n "$item" ] || continue
+        if ! is_ipv4_or_cidr "$item"; then
+            echo "$label contains invalid IP/CIDR: $item" >&2
+            return 1
+        fi
+    done
+}
+
+validate_numeric_range() {
+    local value=$1
+    local label=$2
+    local min=$3
+    local max=$4
+
+    if ! [[ "$value" =~ ^[0-9]+$ ]] || [ "$value" -lt "$min" ] || [ "$value" -gt "$max" ]; then
+        echo "$label must be a number between $min and $max." >&2
+        return 1
+    fi
+}
+
 require_config_value() {
     local var_name=$1
     local value
@@ -145,10 +205,18 @@ validate_config() {
     require_config_value "GRE_IF"
     require_config_value "GRE_MTU"
 
-    if ! [[ "$GRE_MTU" =~ ^[0-9]+$ ]]; then
-        echo "GRE_MTU must be a number." >&2
+    is_ipv4 "$VPS_PUBLIC_IP" || { echo "VPS_PUBLIC_IP must be a valid IPv4 address." >&2; exit 1; }
+    is_ipv4 "$REMOTE_PUBLIC_IP" || { echo "REMOTE_PUBLIC_IP must be a valid IPv4 address." >&2; exit 1; }
+    is_ipv4_cidr "$VPS_TUNNEL_IP" || { echo "VPS_TUNNEL_IP must be IPv4 CIDR, for example 10.10.10.2/30." >&2; exit 1; }
+    is_ipv4 "$REMOTE_TUNNEL_IP" || { echo "REMOTE_TUNNEL_IP must be a valid IPv4 address." >&2; exit 1; }
+    validate_ip_list "$INTERNAL_SUBNETS" "INTERNAL_SUBNETS" || exit 1
+
+    if ! [[ "$GRE_IF" =~ ^[A-Za-z0-9_.:-]{1,15}$ ]]; then
+        echo "GRE_IF must be 1-15 characters using letters, numbers, dot, underscore, colon, or dash." >&2
         exit 1
     fi
+
+    validate_numeric_range "$GRE_MTU" "GRE_MTU" 576 9000 || exit 1
 
     case "$MSS_MODE" in
         clamp|fixed|off)
@@ -161,10 +229,7 @@ validate_config() {
 
     if [ "$MSS_MODE" = "fixed" ]; then
         require_config_value "MSS_VALUE"
-        if ! [[ "$MSS_VALUE" =~ ^[0-9]+$ ]]; then
-            echo "MSS_VALUE must be a number when MSS_MODE=fixed." >&2
-            exit 1
-        fi
+        validate_numeric_range "$MSS_VALUE" "MSS_VALUE" 536 8960 || exit 1
     fi
 
     if [[ "$ENABLE_HARDENING" =~ ^(yes|y|Y)$ ]]; then
@@ -173,6 +238,7 @@ validate_config() {
             echo "ADMIN_IPS must be set before enabling hardening." >&2
             exit 1
         fi
+        validate_ip_list "$ADMIN_IPS" "ADMIN_IPS" || exit 1
     fi
 }
 

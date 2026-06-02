@@ -452,6 +452,10 @@ configuration editor, restore flow, and upgrade flow create a backup before
 changing sensitive state. `/etc/gre-tunnel.conf` is kept as `root:root` with
 `600` permissions.
 
+GREX validates critical IP, CIDR, MTU, MSS, sysctl, and admin allowlist values
+before saving or activating a configuration. When firewall hardening is enabled,
+GREX also warns if the current SSH source IP is not covered by `ADMIN_IPS`.
+
 ---
 
 ## Monitoring and Diagnostics

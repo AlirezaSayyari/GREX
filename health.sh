@@ -32,6 +32,73 @@ get_config_value() {
     printf "%s" "${!var_name}"
 }
 
+is_ipv4() {
+    local ip=$1
+    [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+
+    local IFS=.
+    local octets
+    read -r -a octets <<< "$ip"
+    for octet in "${octets[@]}"; do
+        if ((10#$octet < 0 || 10#$octet > 255)); then
+            return 1
+        fi
+    done
+
+    return 0
+}
+
+is_ipv4_cidr() {
+    local value=$1
+    local ip
+    local prefix
+
+    [[ "$value" =~ ^([^/]+)/([0-9]{1,2})$ ]] || return 1
+    ip=${BASH_REMATCH[1]}
+    prefix=${BASH_REMATCH[2]}
+    is_ipv4 "$ip" || return 1
+    [ "$prefix" -ge 0 ] && [ "$prefix" -le 32 ]
+}
+
+is_ipv4_or_cidr() {
+    is_ipv4 "$1" || is_ipv4_cidr "$1"
+}
+
+trim() {
+    local value=$1
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    printf "%s" "$value"
+}
+
+validate_ip_list_health() {
+    local value=$1
+    local label=$2
+    local item
+
+    IFS=',' read -ra ITEMS <<< "$value"
+    for item in "${ITEMS[@]}"; do
+        item=$(trim "$item")
+        [ -n "$item" ] || continue
+        if ! is_ipv4_or_cidr "$item"; then
+            set_status "CRITICAL"
+            ISSUES+=("$label contains invalid IP/CIDR: $item")
+        fi
+    done
+}
+
+check_numeric_range_health() {
+    local value=$1
+    local label=$2
+    local min=$3
+    local max=$4
+
+    if ! [[ "$value" =~ ^[0-9]+$ ]] || [ "$value" -lt "$min" ] || [ "$value" -gt "$max" ]; then
+        set_status "CRITICAL"
+        ISSUES+=("$label must be a number between $min and $max")
+    fi
+}
+
 normalize_config() {
     local legacy_public_var
     local legacy_tunnel_var
@@ -78,6 +145,37 @@ if [ -n "$LATEST_BACKUP" ]; then
 else
     NOTES+=("No config backup found in $BACKUP_DIR yet")
 fi
+
+[ -n "${VPS_PUBLIC_IP:-}" ] || { set_status "CRITICAL"; ISSUES+=("VPS_PUBLIC_IP is required"); }
+[ -n "${REMOTE_PUBLIC_IP:-}" ] || { set_status "CRITICAL"; ISSUES+=("REMOTE_PUBLIC_IP is required"); }
+[ -n "${INTERNAL_SUBNETS:-}" ] || { set_status "CRITICAL"; ISSUES+=("INTERNAL_SUBNETS is required"); }
+[ -n "${ETH_INTERFACE:-}" ] || { set_status "CRITICAL"; ISSUES+=("ETH_INTERFACE is required"); }
+[ -n "${VPS_TUNNEL_IP:-}" ] || { set_status "CRITICAL"; ISSUES+=("VPS_TUNNEL_IP is required"); }
+[ -n "${REMOTE_TUNNEL_IP:-}" ] || { set_status "CRITICAL"; ISSUES+=("REMOTE_TUNNEL_IP is required"); }
+[ -n "${GRE_IF:-}" ] || { set_status "CRITICAL"; ISSUES+=("GRE_IF is required"); }
+is_ipv4 "$VPS_PUBLIC_IP" || { set_status "CRITICAL"; ISSUES+=("VPS_PUBLIC_IP is not a valid IPv4 address"); }
+is_ipv4 "$REMOTE_PUBLIC_IP" || { set_status "CRITICAL"; ISSUES+=("REMOTE_PUBLIC_IP is not a valid IPv4 address"); }
+is_ipv4_cidr "$VPS_TUNNEL_IP" || { set_status "CRITICAL"; ISSUES+=("VPS_TUNNEL_IP must be IPv4 CIDR, for example 10.10.10.2/30"); }
+is_ipv4 "$REMOTE_TUNNEL_IP" || { set_status "CRITICAL"; ISSUES+=("REMOTE_TUNNEL_IP is not a valid IPv4 address"); }
+validate_ip_list_health "$INTERNAL_SUBNETS" "INTERNAL_SUBNETS"
+if [[ "${ENABLE_DNSMASQ:-yes}" =~ ^(yes|y|Y)$ ]] && [ -n "${DNS_SERVERS:-}" ]; then
+    validate_ip_list_health "$DNS_SERVERS" "DNS_SERVERS"
+fi
+if ! [[ "$GRE_IF" =~ ^[A-Za-z0-9_.:-]{1,15}$ ]]; then
+    set_status "CRITICAL"
+    ISSUES+=("GRE_IF has invalid characters or is longer than 15 characters")
+fi
+check_numeric_range_health "$GRE_MTU" "GRE_MTU" 576 9000
+case "$MSS_MODE" in fixed|clamp|off) ;; *) set_status "CRITICAL"; ISSUES+=("MSS_MODE must be fixed, clamp, or off") ;; esac
+if [ "$MSS_MODE" = "fixed" ]; then
+    check_numeric_range_health "$MSS_VALUE" "MSS_VALUE" 536 8960
+fi
+if [[ "$ENABLE_HARDENING" =~ ^(yes|y|Y)$ ]]; then
+    validate_ip_list_health "$ADMIN_IPS" "ADMIN_IPS"
+fi
+check_numeric_range_health "$RP_FILTER" "RP_FILTER" 0 2
+check_numeric_range_health "$TCP_TIMESTAMPS" "TCP_TIMESTAMPS" 0 1
+check_numeric_range_health "$NF_CONNTRACK_MAX" "NF_CONNTRACK_MAX" 1 999999999
 
 sysctl_value() {
     sysctl -q -n "$1" 2>/dev/null || true

@@ -317,6 +317,195 @@ trim() {
     printf "%s" "$value"
 }
 
+is_ipv4() {
+    local ip=$1
+    [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+
+    local IFS=.
+    local octets
+    read -r -a octets <<< "$ip"
+    for octet in "${octets[@]}"; do
+        if ((10#$octet < 0 || 10#$octet > 255)); then
+            return 1
+        fi
+    done
+
+    return 0
+}
+
+is_ipv4_cidr() {
+    local value=$1
+    local ip
+    local prefix
+
+    [[ "$value" =~ ^([^/]+)/([0-9]{1,2})$ ]] || return 1
+    ip=${BASH_REMATCH[1]}
+    prefix=${BASH_REMATCH[2]}
+    is_ipv4 "$ip" || return 1
+    [ "$prefix" -ge 0 ] && [ "$prefix" -le 32 ]
+}
+
+is_ipv4_or_cidr() {
+    is_ipv4 "$1" || is_ipv4_cidr "$1"
+}
+
+validate_ip_list() {
+    local value=$1
+    local label=$2
+    local item
+
+    IFS=',' read -ra ITEMS <<< "$value"
+    for item in "${ITEMS[@]}"; do
+        item=$(trim "$item")
+        [ -n "$item" ] || continue
+        if ! is_ipv4_or_cidr "$item"; then
+            echo "$label contains invalid IP/CIDR: $item" >&2
+            return 1
+        fi
+    done
+}
+
+validate_numeric_range() {
+    local value=$1
+    local label=$2
+    local min=$3
+    local max=$4
+
+    if ! [[ "$value" =~ ^[0-9]+$ ]] || [ "$value" -lt "$min" ] || [ "$value" -gt "$max" ]; then
+        echo "$label must be a number between $min and $max." >&2
+        return 1
+    fi
+}
+
+ipv4_to_int() {
+    local ip=$1
+    local a b c d
+    IFS=. read -r a b c d <<< "$ip"
+    printf "%u" $((a * 16777216 + b * 65536 + c * 256 + d))
+}
+
+ip_in_cidr() {
+    local ip=$1
+    local cidr=$2
+    local network prefix mask ip_int network_int
+
+    if is_ipv4 "$cidr"; then
+        [ "$ip" = "$cidr" ]
+        return $?
+    fi
+
+    is_ipv4_cidr "$cidr" || return 1
+    network=${cidr%/*}
+    prefix=${cidr#*/}
+    ip_int=$(ipv4_to_int "$ip")
+    network_int=$(ipv4_to_int "$network")
+    if [ "$prefix" -eq 0 ]; then
+        mask=0
+    else
+        mask=$(( (0xffffffff << (32 - prefix)) & 0xffffffff ))
+    fi
+
+    [ $((ip_int & mask)) -eq $((network_int & mask)) ]
+}
+
+ip_in_list() {
+    local ip=$1
+    local list=$2
+    local item
+
+    IFS=',' read -ra ITEMS <<< "$list"
+    for item in "${ITEMS[@]}"; do
+        item=$(trim "$item")
+        [ -n "$item" ] || continue
+        if ip_in_cidr "$ip" "$item"; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+detect_admin_ip() {
+    local ip
+
+    ip=${SSH_CLIENT%% *}
+    if is_ipv4 "$ip"; then
+        printf "%s" "$ip"
+        return 0
+    fi
+
+    ip=${SSH_CONNECTION%% *}
+    if is_ipv4 "$ip"; then
+        printf "%s" "$ip"
+        return 0
+    fi
+
+    return 1
+}
+
+validate_configuration() {
+    [ -n "$VPS_PUBLIC_IP" ] || { echo "VPS_PUBLIC_IP is required." >&2; return 1; }
+    [ -n "$REMOTE_PUBLIC_IP" ] || { echo "REMOTE_PUBLIC_IP is required." >&2; return 1; }
+    [ -n "$INTERNAL_SUBNETS" ] || { echo "INTERNAL_SUBNETS is required." >&2; return 1; }
+    [ -n "$ETH_INTERFACE" ] || { echo "ETH_INTERFACE is required." >&2; return 1; }
+    [ -n "$VPS_TUNNEL_IP" ] || { echo "VPS_TUNNEL_IP is required." >&2; return 1; }
+    [ -n "$REMOTE_TUNNEL_IP" ] || { echo "REMOTE_TUNNEL_IP is required." >&2; return 1; }
+    [ -n "$GRE_IF" ] || { echo "GRE_IF is required." >&2; return 1; }
+
+    is_ipv4 "$VPS_PUBLIC_IP" || { echo "VPS_PUBLIC_IP must be a valid IPv4 address." >&2; return 1; }
+    is_ipv4 "$REMOTE_PUBLIC_IP" || { echo "REMOTE_PUBLIC_IP must be a valid IPv4 address." >&2; return 1; }
+    is_ipv4_cidr "$VPS_TUNNEL_IP" || { echo "VPS_TUNNEL_IP must be IPv4 CIDR, for example 10.10.10.2/30." >&2; return 1; }
+    is_ipv4 "$REMOTE_TUNNEL_IP" || { echo "REMOTE_TUNNEL_IP must be a valid IPv4 address." >&2; return 1; }
+    validate_ip_list "$INTERNAL_SUBNETS" "INTERNAL_SUBNETS" || return 1
+
+    if dns_enabled && [ -n "$DNS_SERVERS" ]; then
+        validate_ip_list "$DNS_SERVERS" "DNS_SERVERS" || return 1
+    fi
+
+    if ! [[ "$GRE_IF" =~ ^[A-Za-z0-9_.:-]{1,15}$ ]]; then
+        echo "GRE_IF must be 1-15 characters using letters, numbers, dot, underscore, colon, or dash." >&2
+        return 1
+    fi
+
+    validate_numeric_range "$GRE_MTU" "GRE_MTU" 576 9000 || return 1
+    case "$MSS_MODE" in fixed|clamp|off) ;; *) echo "MSS_MODE must be fixed, clamp, or off." >&2; return 1 ;; esac
+    if [ "$MSS_MODE" = "fixed" ]; then
+        validate_numeric_range "$MSS_VALUE" "MSS_VALUE" 536 8960 || return 1
+    fi
+
+    if truthy "$ENABLE_HARDENING"; then
+        [ -n "$ADMIN_IPS" ] && [ "$ADMIN_IPS" != "x.x.x.x" ] || { echo "ADMIN_IPS must be configured when hardening is enabled." >&2; return 1; }
+        validate_ip_list "$ADMIN_IPS" "ADMIN_IPS" || return 1
+    fi
+
+    case "$SYSCTL_PROFILE" in safe|strict|custom|off) ;; *) echo "SYSCTL_PROFILE must be safe, strict, custom, or off." >&2; return 1 ;; esac
+    validate_numeric_range "$RP_FILTER" "RP_FILTER" 0 2 || return 1
+    validate_numeric_range "$TCP_TIMESTAMPS" "TCP_TIMESTAMPS" 0 1 || return 1
+    validate_numeric_range "$NF_CONNTRACK_MAX" "NF_CONNTRACK_MAX" 1 999999999 || return 1
+}
+
+confirm_ssh_lockout_risk() {
+    local detected_admin_ip
+    local answer
+
+    truthy "$ENABLE_HARDENING" || return 0
+    detected_admin_ip=$(detect_admin_ip || true)
+
+    if [ -z "$detected_admin_ip" ]; then
+        echo "WARNING: Could not detect your current SSH source IP." >&2
+        read -r -p "Continue with firewall hardening anyway? (yes/no) [no]: " answer
+        [[ "${answer:-no}" =~ ^(yes|y|Y)$ ]]
+        return $?
+    fi
+
+    if ! ip_in_list "$detected_admin_ip" "$ADMIN_IPS"; then
+        echo "WARNING: Your current SSH source IP ($detected_admin_ip) is not in ADMIN_IPS: $ADMIN_IPS" >&2
+        read -r -p "This can lock you out. Continue anyway? (yes/no) [no]: " answer
+        [[ "${answer:-no}" =~ ^(yes|y|Y)$ ]]
+        return $?
+    fi
+}
+
 normalize_config() {
     local legacy_public_var
     local legacy_tunnel_var
@@ -477,12 +666,14 @@ EOF
 
 apply_saved_config() {
     load_config || return 1
+    validate_configuration || return 1
+    confirm_ssh_lockout_risk || return 1
     configure_dnsmasq_file
     configure_fail2ban_from_config
     if [ -x "$SCRIPT_DIR/gre-sysctl.sh" ]; then
         run_as_root "$SCRIPT_DIR/gre-sysctl.sh"
     fi
-    activate
+    SKIP_LOCKOUT_CONFIRM=1 activate
 }
 
 edit_config_value() {
@@ -490,22 +681,34 @@ edit_config_value() {
     local label=$2
     local current_value
     local new_value
+    local old_value
 
     current_value=${!var_name}
     echo
     echo "$label"
     echo "Current: ${current_value:-<blank>}"
     read -r -p "New value (leave blank to keep current, type <blank> to clear): " new_value
+    old_value=$current_value
     if [ "$new_value" = "<blank>" ]; then
         printf -v "$var_name" "%s" ""
-        write_config
-        echo "Cleared $var_name."
     elif [ -n "$new_value" ]; then
         printf -v "$var_name" "%s" "$new_value"
-        write_config
-        echo "Saved $var_name."
     else
         echo "No change."
+        read -p "Press Enter to continue..." _
+        return 0
+    fi
+
+    if ! validate_configuration; then
+        printf -v "$var_name" "%s" "$old_value"
+        echo "Invalid value. $var_name was not changed."
+    else
+        write_config
+        if [ "$new_value" = "<blank>" ]; then
+            echo "Cleared $var_name."
+        else
+            echo "Saved $var_name."
+        fi
     fi
     read -p "Press Enter to continue..." _
 }
@@ -607,6 +810,10 @@ activate() {
     fi
     source "$CONFIG_FILE"
     normalize_config
+    validate_configuration || exit 1
+    if [ "${SKIP_LOCKOUT_CONFIRM:-0}" != "1" ]; then
+        confirm_ssh_lockout_risk || exit 1
+    fi
     if has_systemd; then
         run_as_root systemctl daemon-reload
         run_as_root systemctl enable gre-tunnel
@@ -788,6 +995,9 @@ case $COMMAND in
     start)
         if [ -f "$CONFIG_FILE" ]; then
             source "$CONFIG_FILE"
+            normalize_config
+            validate_configuration || exit 1
+            confirm_ssh_lockout_risk || exit 1
         fi
         if has_systemd; then
             run_as_root systemctl start gre-tunnel
