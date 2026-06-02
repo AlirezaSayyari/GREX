@@ -47,6 +47,22 @@ normalize_config() {
 
 normalize_config
 
+recommended_mss_for_mtu() {
+    local mtu=$1
+
+    if [[ "$mtu" =~ ^[0-9]+$ ]] && [ "$mtu" -gt 40 ]; then
+        printf "%s" "$((mtu - 40))"
+    fi
+}
+
+icmp_payload_for_mtu() {
+    local mtu=$1
+
+    if [[ "$mtu" =~ ^[0-9]+$ ]] && [ "$mtu" -gt 28 ]; then
+        printf "%s" "$((mtu - 28))"
+    fi
+}
+
 iptables_backend() {
     local command_name=${1:-iptables}
     local version
@@ -102,6 +118,8 @@ echo
 echo "1. Tunnel Interface:"
 ip -br a | grep "$GRE_IF" || echo "Tunnel interface $GRE_IF not found!"
 echo "Expected MTU: $GRE_MTU"
+current_mtu=$(ip link show dev "$GRE_IF" 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i == "mtu") print $(i+1)}')
+effective_mtu=${current_mtu:-$GRE_MTU}
 
 # Check routes
 echo
@@ -145,7 +163,23 @@ iptables -t mangle -L GREX-MANGLE -n -v 2>/dev/null || echo "GREX-MANGLE chain n
 echo "MSS mode: $MSS_MODE ${MSS_VALUE:-}"
 
 echo
-echo "5c. Conntrack Capacity:"
+echo "5c. MTU/MSS Diagnostics:"
+echo "Configured GRE MTU: $GRE_MTU"
+echo "Current GRE MTU: ${current_mtu:-unknown}"
+recommended_mss=$(recommended_mss_for_mtu "$effective_mtu")
+df_ping_payload=$(icmp_payload_for_mtu "$effective_mtu")
+if [ -n "$recommended_mss" ]; then
+    echo "Recommended fixed MSS for MTU $effective_mtu: $recommended_mss"
+fi
+if [ "$MSS_MODE" = "fixed" ] && [ -n "$recommended_mss" ] && [[ "$MSS_VALUE" =~ ^[0-9]+$ ]] && [ "$MSS_VALUE" -gt "$recommended_mss" ]; then
+    echo "WARNING: MSS_VALUE $MSS_VALUE is higher than recommended $recommended_mss"
+fi
+if [ -n "$df_ping_payload" ]; then
+    echo "Tunnel DF probe: ping $REMOTE_TUNNEL_IP -M do -s $df_ping_payload -c 4"
+fi
+
+echo
+echo "5d. Conntrack Capacity:"
 conntrack_count=$(sysctl -q -n net.netfilter.nf_conntrack_count 2>/dev/null || true)
 conntrack_max=$(sysctl -q -n net.netfilter.nf_conntrack_max 2>/dev/null || true)
 if [ -n "$conntrack_count" ] && [ -n "$conntrack_max" ] && [ "$conntrack_max" -gt 0 ]; then
@@ -162,7 +196,7 @@ else
 fi
 
 echo
-echo "5d. Sysctl Hardening:"
+echo "5e. Sysctl Hardening:"
 if [[ "$ENABLE_SYSCTL_HARDENING" =~ ^(yes|y|Y)$ ]]; then
     echo "Sysctl hardening is enabled in GREX config"
     echo "Profile: $SYSCTL_PROFILE"
@@ -189,7 +223,7 @@ else
 fi
 
 echo
-echo "5e. fail2ban:"
+echo "5f. fail2ban:"
 if [[ "$ENABLE_FAIL2BAN" =~ ^(yes|y|Y)$ ]]; then
     echo "fail2ban is enabled in GREX config"
     cat /etc/fail2ban/jail.d/grex-sshd.local 2>/dev/null || echo "GREX fail2ban jail not found"

@@ -109,6 +109,30 @@ check_limit_rate_health() {
     fi
 }
 
+ipv4_cidr_prefix() {
+    local cidr=$1
+
+    if [[ "$cidr" =~ /([0-9]{1,2})$ ]]; then
+        printf "%s" "${BASH_REMATCH[1]}"
+    fi
+}
+
+recommended_mss_for_mtu() {
+    local mtu=$1
+
+    if [[ "$mtu" =~ ^[0-9]+$ ]] && [ "$mtu" -gt 40 ]; then
+        printf "%s" "$((mtu - 40))"
+    fi
+}
+
+icmp_payload_for_mtu() {
+    local mtu=$1
+
+    if [[ "$mtu" =~ ^[0-9]+$ ]] && [ "$mtu" -gt 28 ]; then
+        printf "%s" "$((mtu - 28))"
+    fi
+}
+
 iptables_backend() {
     local command_name=${1:-iptables}
     local version
@@ -223,6 +247,11 @@ is_ipv4 "$VPS_PUBLIC_IP" || { set_status "CRITICAL"; ISSUES+=("VPS_PUBLIC_IP is 
 is_ipv4 "$REMOTE_PUBLIC_IP" || { set_status "CRITICAL"; ISSUES+=("REMOTE_PUBLIC_IP is not a valid IPv4 address"); }
 is_ipv4_cidr "$VPS_TUNNEL_IP" || { set_status "CRITICAL"; ISSUES+=("VPS_TUNNEL_IP must be IPv4 CIDR, for example 10.10.10.2/30"); }
 is_ipv4 "$REMOTE_TUNNEL_IP" || { set_status "CRITICAL"; ISSUES+=("REMOTE_TUNNEL_IP is not a valid IPv4 address"); }
+VPS_TUNNEL_PREFIX=$(ipv4_cidr_prefix "$VPS_TUNNEL_IP")
+if [ -n "$VPS_TUNNEL_PREFIX" ] && [ "$VPS_TUNNEL_PREFIX" -lt 30 ]; then
+    set_status "WARNING"
+    ISSUES+=("VPS_TUNNEL_IP prefix is /$VPS_TUNNEL_PREFIX; GRE point-to-point links usually use /30 or /31")
+fi
 validate_ip_list_health "$INTERNAL_SUBNETS" "INTERNAL_SUBNETS"
 if [[ "${ENABLE_DNSMASQ:-yes}" =~ ^(yes|y|Y)$ ]] && [ -n "${DNS_SERVERS:-}" ]; then
     validate_ip_list_health "$DNS_SERVERS" "DNS_SERVERS"
@@ -293,6 +322,27 @@ CURRENT_MTU=$(ip link show dev "$GRE_IF" 2>/dev/null | awk '{for (i=1; i<=NF; i+
 if [ -n "$CURRENT_MTU" ] && [ "$CURRENT_MTU" != "$GRE_MTU" ]; then
     set_status "WARNING"
     ISSUES+=("Tunnel interface $GRE_IF MTU is $CURRENT_MTU, expected $GRE_MTU")
+fi
+
+EFFECTIVE_MTU=${CURRENT_MTU:-$GRE_MTU}
+RECOMMENDED_MSS=$(recommended_mss_for_mtu "$EFFECTIVE_MTU")
+DF_PING_PAYLOAD=$(icmp_payload_for_mtu "$EFFECTIVE_MTU")
+if [ -n "$RECOMMENDED_MSS" ]; then
+    NOTES+=("Recommended fixed MSS for MTU $EFFECTIVE_MTU is $RECOMMENDED_MSS")
+fi
+if [ -n "$DF_PING_PAYLOAD" ] && [ -n "${REMOTE_TUNNEL_IP:-}" ]; then
+    NOTES+=("MTU probe command: ping $REMOTE_TUNNEL_IP -M do -s $DF_PING_PAYLOAD -c 4")
+fi
+if [ "$MSS_MODE" = "fixed" ] &&
+   [[ "$MSS_VALUE" =~ ^[0-9]+$ ]] &&
+   [ -n "$RECOMMENDED_MSS" ] &&
+   [ "$MSS_VALUE" -gt "$RECOMMENDED_MSS" ]; then
+    set_status "WARNING"
+    ISSUES+=("MSS_VALUE is $MSS_VALUE but recommended maximum for MTU $EFFECTIVE_MTU is $RECOMMENDED_MSS")
+fi
+if [ "$MSS_MODE" = "off" ]; then
+    set_status "WARNING"
+    ISSUES+=("MSS_MODE is off; GRE paths commonly need MSS clamping or a safe fixed MSS")
 fi
 
 # Check routes

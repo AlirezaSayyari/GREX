@@ -299,6 +299,10 @@ sudo iptables -t mangle -A GREX-MANGLE -o grex -p tcp --tcp-flags SYN,RST SYN -j
 Use `--clamp-mss-to-pmtu` instead of `--set-mss 1360` if PMTU discovery is
 reliable on your path. The wizard exposes this as `MSS_MODE`.
 
+For a GRE interface MTU of `1400`, the usual safe fixed TCP MSS is `1360`
+because IPv4 and TCP headers add `40` bytes. `sudo grex check` prints the
+recommended fixed MSS and a ready-to-run DF ping probe for your current GRE MTU.
+
 ### 6. Harden VPS input and default forwarding
 
 Replace `<ADMIN_IP_OR_CIDR>` before applying these rules. Repeat the SSH rule
@@ -523,6 +527,21 @@ sudo iptables -S GREX-FORWARD | grep -- '-j LOG'
 sudo iptables -S GREX-EGRESS | grep -- '-j LOG'
 sudo iptables -S GREX-INPUT | grep -- '-j LOG'
 ```
+
+### MTU and MSS diagnostics
+
+If downloads ramp up slowly, browsers pause before loading, or large transfers
+behave differently from small pings, verify tunnel MTU before tuning TCP.
+
+For a configured GRE MTU of `1400`:
+
+```bash
+ping <REMOTE_TUNNEL_IP> -M do -s 1372 -c 4
+```
+
+The payload is `MTU - 28` for IPv4 ICMP. If that fails but smaller values pass,
+lower `GRE_MTU` or use a lower fixed `MSS_VALUE`. Health check also warns when
+`MSS_MODE=fixed` uses an MSS higher than `GRE_MTU - 40`.
 
 ### Conntrack capacity
 
