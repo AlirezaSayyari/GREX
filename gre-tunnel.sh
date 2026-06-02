@@ -69,6 +69,9 @@ normalize_config() {
     ENABLE_EGRESS_FILTERING=${ENABLE_EGRESS_FILTERING:-no}
     BLOCK_SMTP_OUT=${BLOCK_SMTP_OUT:-yes}
     BLOCK_PRIVATE_DESTINATIONS=${BLOCK_PRIVATE_DESTINATIONS:-yes}
+    ENABLE_DROP_LOGGING=${ENABLE_DROP_LOGGING:-no}
+    DROP_LOG_RATE=${DROP_LOG_RATE:-3/min}
+    DROP_LOG_BURST=${DROP_LOG_BURST:-10}
 }
 
 trim() {
@@ -134,6 +137,16 @@ validate_numeric_range() {
 
     if ! [[ "$value" =~ ^[0-9]+$ ]] || [ "$value" -lt "$min" ] || [ "$value" -gt "$max" ]; then
         echo "$label must be a number between $min and $max." >&2
+        return 1
+    fi
+}
+
+validate_limit_rate() {
+    local value=$1
+    local label=$2
+
+    if ! [[ "$value" =~ ^[0-9]+/(sec|min|hour|day|second|minute)$ ]]; then
+        echo "$label must look like 3/min, 10/sec, or 1/hour." >&2
         return 1
     fi
 }
@@ -244,6 +257,11 @@ validate_config() {
         fi
         validate_ip_list "$ADMIN_IPS" "ADMIN_IPS" || exit 1
     fi
+
+    if [[ "$ENABLE_DROP_LOGGING" =~ ^(yes|y|Y)$ ]]; then
+        validate_limit_rate "$DROP_LOG_RATE" "DROP_LOG_RATE" || exit 1
+        validate_numeric_range "$DROP_LOG_BURST" "DROP_LOG_BURST" 1 1000 || exit 1
+    fi
 }
 
 delete_rule_if_exists() {
@@ -254,6 +272,17 @@ delete_rule_if_exists() {
     while iptables -t "$table" -C "$chain" "$@" 2>/dev/null; do
         iptables -t "$table" -D "$chain" "$@" 2>/dev/null || break
     done
+}
+
+append_drop_log_rule() {
+    local chain=$1
+    local prefix=$2
+    shift 2
+
+    if [[ "$ENABLE_DROP_LOGGING" =~ ^(yes|y|Y)$ ]]; then
+        iptables -A "$chain" "$@" -m limit --limit "$DROP_LOG_RATE" --limit-burst "$DROP_LOG_BURST" \
+            -j LOG --log-prefix "$prefix" --log-level 4
+    fi
 }
 
 setup_forward_chain() {
@@ -280,11 +309,13 @@ setup_egress_chain() {
                 198.18.0.0/15 \
                 224.0.0.0/4 \
                 240.0.0.0/4; do
+                append_drop_log_rule "$GREX_EGRESS_CHAIN" "GREX EGRESS DST " -d "$dst"
                 iptables -A "$GREX_EGRESS_CHAIN" -d "$dst" -j DROP
             done
         fi
 
         if [[ "$BLOCK_SMTP_OUT" =~ ^(yes|y|Y)$ ]]; then
+            append_drop_log_rule "$GREX_EGRESS_CHAIN" "GREX EGRESS SMTP " -p tcp --dport 25
             iptables -A "$GREX_EGRESS_CHAIN" -p tcp --dport 25 -j DROP
         fi
     fi
@@ -358,6 +389,8 @@ setup_input_hardening() {
             append_rule_if_missing filter "$GREX_INPUT_CHAIN" -i "$GRE_IF" -p udp --dport 53 -j ACCEPT
             append_rule_if_missing filter "$GREX_INPUT_CHAIN" -i "$GRE_IF" -p tcp --dport 53 -j ACCEPT
         fi
+
+        append_drop_log_rule "$GREX_INPUT_CHAIN" "GREX INPUT DROP "
 
         iptables -P INPUT DROP
         iptables -P FORWARD DROP
@@ -437,6 +470,7 @@ for subnet in "${SUBNETS[@]}"; do
     [ -n "$subnet" ] || continue
     iptables -A "$GREX_CHAIN" -i "$GRE_IF" -o "$ETH_INTERFACE" -s "$subnet" -j "$GREX_EGRESS_CHAIN"
 done
+append_drop_log_rule "$GREX_CHAIN" "GREX FWD SPOOF "
 iptables -A "$GREX_CHAIN" -i "$GRE_IF" -o "$ETH_INTERFACE" -j DROP
 
 # Input hardening and GRE protocol access

@@ -280,11 +280,14 @@ sudo iptables -I FORWARD 1 -j GREX-FORWARD
 sudo iptables -A GREX-FORWARD -i eth0 -o grex -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 sudo iptables -A GREX-FORWARD -i grex -o eth0 -s 192.168.0.0/16 -j GREX-EGRESS
 sudo iptables -A GREX-FORWARD -i grex -o eth0 -s 172.16.0.0/12 -j GREX-EGRESS
+sudo iptables -A GREX-FORWARD -i grex -o eth0 -m limit --limit 3/min --limit-burst 10 -j LOG --log-prefix "GREX FWD SPOOF " --log-level 4
 sudo iptables -A GREX-FORWARD -i grex -o eth0 -j DROP
 # Optional egress filtering examples:
+sudo iptables -A GREX-EGRESS -d 10.0.0.0/8 -m limit --limit 3/min --limit-burst 10 -j LOG --log-prefix "GREX EGRESS DST " --log-level 4
 sudo iptables -A GREX-EGRESS -d 10.0.0.0/8 -j DROP
 sudo iptables -A GREX-EGRESS -d 172.16.0.0/12 -j DROP
 sudo iptables -A GREX-EGRESS -d 192.168.0.0/16 -j DROP
+sudo iptables -A GREX-EGRESS -p tcp --dport 25 -m limit --limit 3/min --limit-burst 10 -j LOG --log-prefix "GREX EGRESS SMTP " --log-level 4
 sudo iptables -A GREX-EGRESS -p tcp --dport 25 -j DROP
 sudo iptables -A GREX-EGRESS -j ACCEPT
 sudo iptables -t mangle -N GREX-MANGLE 2>/dev/null || true
@@ -310,6 +313,7 @@ sudo iptables -A GREX-INPUT -i lo -j ACCEPT
 sudo iptables -A GREX-INPUT -p icmp -j ACCEPT
 sudo iptables -A GREX-INPUT -p 47 -s <REMOTE_PUBLIC_IP> -j ACCEPT
 sudo iptables -A GREX-INPUT -p tcp --dport 22 -s <ADMIN_IP_OR_CIDR> -m conntrack --ctstate NEW -j ACCEPT
+sudo iptables -A GREX-INPUT -m limit --limit 3/min --limit-burst 10 -j LOG --log-prefix "GREX INPUT DROP " --log-level 4
 sudo iptables -P INPUT DROP
 sudo iptables -P FORWARD DROP
 sudo iptables -P OUTPUT ACCEPT
@@ -331,6 +335,19 @@ is NATed to the Internet. This is disabled by default to avoid breaking valid
 workloads. When enabled, GREX can block direct outbound SMTP on TCP port `25`
 and block private/reserved destination ranges from being reached through the
 Internet egress path.
+
+### Rate-limited drop logging
+
+GREX can add optional `LOG` rules immediately before managed drop rules. This is
+disabled by default because busy gateways can produce a lot of kernel log
+traffic. When enabled, the default rate is `3/min` with burst `10`.
+
+Useful log checks:
+
+```bash
+sudo journalctl -k -g 'GREX ' --no-pager
+sudo dmesg | grep 'GREX '
+```
 
 ### 7. Kernel and network hardening
 
@@ -501,6 +518,9 @@ tcpdump -ni grex port 53
 sudo iptables -t nat -L -n -v
 sudo iptables -L FORWARD -n -v
 sudo iptables -L GREX-FORWARD -n -v
+sudo iptables -S GREX-FORWARD | grep -- '-j LOG'
+sudo iptables -S GREX-EGRESS | grep -- '-j LOG'
+sudo iptables -S GREX-INPUT | grep -- '-j LOG'
 ```
 
 ---

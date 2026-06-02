@@ -121,6 +121,12 @@ iptables -L GREX-FORWARD -n -v 2>/dev/null || echo "GREX-FORWARD chain not found
 echo
 echo "4c. GREX Egress Filtering Rules:"
 iptables -L GREX-EGRESS -n -v 2>/dev/null || echo "GREX-EGRESS chain not found"
+echo
+echo "4d. GREX Drop Logging Rules:"
+iptables -S GREX-FORWARD 2>/dev/null | grep -- "-j LOG" || true
+iptables -S GREX-EGRESS 2>/dev/null | grep -- "-j LOG" || true
+iptables -S GREX-INPUT 2>/dev/null | grep -- "-j LOG" || true
+echo "Drop logging: ${ENABLE_DROP_LOGGING:-no}, rate: ${DROP_LOG_RATE:-3/min}, burst: ${DROP_LOG_BURST:-10}"
 
 # Check GRE input rule
 echo

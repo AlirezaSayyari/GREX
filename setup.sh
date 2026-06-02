@@ -179,6 +179,16 @@ validate_numeric_range() {
     fi
 }
 
+validate_limit_rate() {
+    local value=$1
+    local label=$2
+
+    if ! [[ "$value" =~ ^[0-9]+/(sec|min|hour|day|second|minute)$ ]]; then
+        echo "$label must look like 3/min, 10/sec, or 1/hour." >&2
+        return 1
+    fi
+}
+
 validate_configuration() {
     [ -n "$VPS_PUBLIC_IP" ] || { echo "VPS_PUBLIC_IP is required." >&2; return 1; }
     [ -n "$REMOTE_PUBLIC_IP" ] || { echo "REMOTE_PUBLIC_IP is required." >&2; return 1; }
@@ -212,6 +222,11 @@ validate_configuration() {
     if [[ "$ENABLE_HARDENING" =~ ^(yes|y|Y)$ ]]; then
         [ -n "$ADMIN_IPS" ] && [ "$ADMIN_IPS" != "x.x.x.x" ] || { echo "ADMIN_IPS must be configured when hardening is enabled." >&2; return 1; }
         validate_ip_list "$ADMIN_IPS" "ADMIN_IPS" || return 1
+    fi
+
+    if [[ "$ENABLE_DROP_LOGGING" =~ ^(yes|y|Y)$ ]]; then
+        validate_limit_rate "$DROP_LOG_RATE" "DROP_LOG_RATE" || return 1
+        validate_numeric_range "$DROP_LOG_BURST" "DROP_LOG_BURST" 1 1000 || return 1
     fi
 
     case "$SYSCTL_PROFILE" in safe|strict|custom|off) ;; *) echo "SYSCTL_PROFILE must be safe, strict, custom, or off." >&2; return 1 ;; esac
@@ -499,6 +514,14 @@ else
     BLOCK_SMTP_OUT=yes
     BLOCK_PRIVATE_DESTINATIONS=yes
 fi
+prompt ENABLE_DROP_LOGGING "Enable rate-limited firewall drop logging? (yes/no)" "no"
+if [[ "$ENABLE_DROP_LOGGING" =~ ^(yes|y|Y)$ ]]; then
+    prompt DROP_LOG_RATE "Firewall drop log rate limit" "3/min"
+    prompt DROP_LOG_BURST "Firewall drop log burst" "10"
+else
+    DROP_LOG_RATE=3/min
+    DROP_LOG_BURST=10
+fi
 prompt ENABLE_SYSCTL_HARDENING "Enable kernel/network sysctl hardening? (yes/no)" "yes"
 if [[ "$ENABLE_SYSCTL_HARDENING" =~ ^(yes|y|Y)$ ]]; then
     prompt SYSCTL_PROFILE "Sysctl profile (safe/strict/custom)" "safe"
@@ -570,6 +593,9 @@ ALLOW_ICMP=$ALLOW_ICMP
 ENABLE_EGRESS_FILTERING=$ENABLE_EGRESS_FILTERING
 BLOCK_SMTP_OUT=$BLOCK_SMTP_OUT
 BLOCK_PRIVATE_DESTINATIONS=$BLOCK_PRIVATE_DESTINATIONS
+ENABLE_DROP_LOGGING=$ENABLE_DROP_LOGGING
+DROP_LOG_RATE=$DROP_LOG_RATE
+DROP_LOG_BURST=$DROP_LOG_BURST
 ENABLE_SYSCTL_HARDENING=$ENABLE_SYSCTL_HARDENING
 SYSCTL_PROFILE=$SYSCTL_PROFILE
 RP_FILTER=$RP_FILTER

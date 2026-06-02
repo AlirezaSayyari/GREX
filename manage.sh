@@ -377,6 +377,16 @@ validate_numeric_range() {
     fi
 }
 
+validate_limit_rate() {
+    local value=$1
+    local label=$2
+
+    if ! [[ "$value" =~ ^[0-9]+/(sec|min|hour|day|second|minute)$ ]]; then
+        echo "$label must look like 3/min, 10/sec, or 1/hour." >&2
+        return 1
+    fi
+}
+
 ipv4_to_int() {
     local ip=$1
     local a b c d
@@ -478,6 +488,11 @@ validate_configuration() {
         validate_ip_list "$ADMIN_IPS" "ADMIN_IPS" || return 1
     fi
 
+    if truthy "$ENABLE_DROP_LOGGING"; then
+        validate_limit_rate "$DROP_LOG_RATE" "DROP_LOG_RATE" || return 1
+        validate_numeric_range "$DROP_LOG_BURST" "DROP_LOG_BURST" 1 1000 || return 1
+    fi
+
     case "$SYSCTL_PROFILE" in safe|strict|custom|off) ;; *) echo "SYSCTL_PROFILE must be safe, strict, custom, or off." >&2; return 1 ;; esac
     validate_numeric_range "$RP_FILTER" "RP_FILTER" 0 2 || return 1
     validate_numeric_range "$TCP_TIMESTAMPS" "TCP_TIMESTAMPS" 0 1 || return 1
@@ -534,6 +549,9 @@ normalize_config() {
     ENABLE_EGRESS_FILTERING=${ENABLE_EGRESS_FILTERING:-no}
     BLOCK_SMTP_OUT=${BLOCK_SMTP_OUT:-yes}
     BLOCK_PRIVATE_DESTINATIONS=${BLOCK_PRIVATE_DESTINATIONS:-yes}
+    ENABLE_DROP_LOGGING=${ENABLE_DROP_LOGGING:-no}
+    DROP_LOG_RATE=${DROP_LOG_RATE:-3/min}
+    DROP_LOG_BURST=${DROP_LOG_BURST:-10}
     ENABLE_SYSCTL_HARDENING=${ENABLE_SYSCTL_HARDENING:-yes}
     SYSCTL_PROFILE=${SYSCTL_PROFILE:-safe}
     RP_FILTER=${RP_FILTER:-2}
@@ -581,6 +599,9 @@ ALLOW_ICMP=$ALLOW_ICMP
 ENABLE_EGRESS_FILTERING=$ENABLE_EGRESS_FILTERING
 BLOCK_SMTP_OUT=$BLOCK_SMTP_OUT
 BLOCK_PRIVATE_DESTINATIONS=$BLOCK_PRIVATE_DESTINATIONS
+ENABLE_DROP_LOGGING=$ENABLE_DROP_LOGGING
+DROP_LOG_RATE=$DROP_LOG_RATE
+DROP_LOG_BURST=$DROP_LOG_BURST
 ENABLE_SYSCTL_HARDENING=$ENABLE_SYSCTL_HARDENING
 SYSCTL_PROFILE=$SYSCTL_PROFILE
 RP_FILTER=$RP_FILTER
@@ -749,19 +770,22 @@ edit_config_menu() {
         echo "17) Egress filtering enabled      [$ENABLE_EGRESS_FILTERING]"
         echo "18) Block outbound SMTP           [$BLOCK_SMTP_OUT]"
         echo "19) Block private destinations    [$BLOCK_PRIVATE_DESTINATIONS]"
-        echo "20) Sysctl hardening enabled      [$ENABLE_SYSCTL_HARDENING]"
-        echo "21) Sysctl profile                [$SYSCTL_PROFILE]"
-        echo "22) rp_filter                     [$RP_FILTER]"
-        echo "23) TCP timestamps                [$TCP_TIMESTAMPS]"
-        echo "24) Log martians                  [$LOG_MARTIANS]"
-        echo "25) Disable IPv6                  [$DISABLE_IPV6]"
-        echo "26) nf_conntrack_max              [$NF_CONNTRACK_MAX]"
-        echo "27) fail2ban enabled              [$ENABLE_FAIL2BAN]"
-        echo "28) fail2ban sshd enabled         [$FAIL2BAN_SSHD_ENABLED]"
-        echo "29) fail2ban sshd port            [$FAIL2BAN_SSHD_PORT]"
-        echo "30) fail2ban maxretry             [$FAIL2BAN_SSHD_MAXRETRY]"
-        echo "31) fail2ban findtime             [$FAIL2BAN_SSHD_FINDTIME]"
-        echo "32) fail2ban bantime              [$FAIL2BAN_SSHD_BANTIME]"
+        echo "20) Firewall drop logging         [$ENABLE_DROP_LOGGING]"
+        echo "21) Drop log rate limit           [$DROP_LOG_RATE]"
+        echo "22) Drop log burst                [$DROP_LOG_BURST]"
+        echo "23) Sysctl hardening enabled      [$ENABLE_SYSCTL_HARDENING]"
+        echo "24) Sysctl profile                [$SYSCTL_PROFILE]"
+        echo "25) rp_filter                     [$RP_FILTER]"
+        echo "26) TCP timestamps                [$TCP_TIMESTAMPS]"
+        echo "27) Log martians                  [$LOG_MARTIANS]"
+        echo "28) Disable IPv6                  [$DISABLE_IPV6]"
+        echo "29) nf_conntrack_max              [$NF_CONNTRACK_MAX]"
+        echo "30) fail2ban enabled              [$ENABLE_FAIL2BAN]"
+        echo "31) fail2ban sshd enabled         [$FAIL2BAN_SSHD_ENABLED]"
+        echo "32) fail2ban sshd port            [$FAIL2BAN_SSHD_PORT]"
+        echo "33) fail2ban maxretry             [$FAIL2BAN_SSHD_MAXRETRY]"
+        echo "34) fail2ban findtime             [$FAIL2BAN_SSHD_FINDTIME]"
+        echo "35) fail2ban bantime              [$FAIL2BAN_SSHD_BANTIME]"
         echo "A) Apply saved configuration"
         echo "0) Back"
         echo
@@ -786,19 +810,22 @@ edit_config_menu() {
             17) edit_config_value ENABLE_EGRESS_FILTERING "Enable optional egress filtering? (yes/no)" ;;
             18) edit_config_value BLOCK_SMTP_OUT "Block outbound SMTP port 25? (yes/no)" ;;
             19) edit_config_value BLOCK_PRIVATE_DESTINATIONS "Block private/reserved destinations? (yes/no)" ;;
-            20) edit_config_value ENABLE_SYSCTL_HARDENING "Enable sysctl hardening? (yes/no)" ;;
-            21) edit_config_value SYSCTL_PROFILE "Sysctl profile (safe/strict/custom)" ;;
-            22) edit_config_value RP_FILTER "rp_filter (2 loose, 1 strict, 0 off)" ;;
-            23) edit_config_value TCP_TIMESTAMPS "TCP timestamps (1 on, 0 off)" ;;
-            24) edit_config_value LOG_MARTIANS "Log martians? (yes/no)" ;;
-            25) edit_config_value DISABLE_IPV6 "Disable IPv6? (yes/no)" ;;
-            26) edit_config_value NF_CONNTRACK_MAX "nf_conntrack_max" ;;
-            27) edit_config_value ENABLE_FAIL2BAN "Enable fail2ban? (yes/no)" ;;
-            28) edit_config_value FAIL2BAN_SSHD_ENABLED "fail2ban sshd enabled (true/false)" ;;
-            29) edit_config_value FAIL2BAN_SSHD_PORT "fail2ban sshd port" ;;
-            30) edit_config_value FAIL2BAN_SSHD_MAXRETRY "fail2ban maxretry" ;;
-            31) edit_config_value FAIL2BAN_SSHD_FINDTIME "fail2ban findtime" ;;
-            32) edit_config_value FAIL2BAN_SSHD_BANTIME "fail2ban bantime" ;;
+            20) edit_config_value ENABLE_DROP_LOGGING "Enable rate-limited firewall drop logging? (yes/no)" ;;
+            21) edit_config_value DROP_LOG_RATE "Firewall drop log rate limit" ;;
+            22) edit_config_value DROP_LOG_BURST "Firewall drop log burst" ;;
+            23) edit_config_value ENABLE_SYSCTL_HARDENING "Enable sysctl hardening? (yes/no)" ;;
+            24) edit_config_value SYSCTL_PROFILE "Sysctl profile (safe/strict/custom)" ;;
+            25) edit_config_value RP_FILTER "rp_filter (2 loose, 1 strict, 0 off)" ;;
+            26) edit_config_value TCP_TIMESTAMPS "TCP timestamps (1 on, 0 off)" ;;
+            27) edit_config_value LOG_MARTIANS "Log martians? (yes/no)" ;;
+            28) edit_config_value DISABLE_IPV6 "Disable IPv6? (yes/no)" ;;
+            29) edit_config_value NF_CONNTRACK_MAX "nf_conntrack_max" ;;
+            30) edit_config_value ENABLE_FAIL2BAN "Enable fail2ban? (yes/no)" ;;
+            31) edit_config_value FAIL2BAN_SSHD_ENABLED "fail2ban sshd enabled (true/false)" ;;
+            32) edit_config_value FAIL2BAN_SSHD_PORT "fail2ban sshd port" ;;
+            33) edit_config_value FAIL2BAN_SSHD_MAXRETRY "fail2ban maxretry" ;;
+            34) edit_config_value FAIL2BAN_SSHD_FINDTIME "fail2ban findtime" ;;
+            35) edit_config_value FAIL2BAN_SSHD_BANTIME "fail2ban bantime" ;;
             A|a)
                 apply_saved_config
                 read -p "Press Enter to continue..." _

@@ -99,6 +99,16 @@ check_numeric_range_health() {
     fi
 }
 
+check_limit_rate_health() {
+    local value=$1
+    local label=$2
+
+    if ! [[ "$value" =~ ^[0-9]+/(sec|min|hour|day|second|minute)$ ]]; then
+        set_status "CRITICAL"
+        ISSUES+=("$label must look like 3/min, 10/sec, or 1/hour")
+    fi
+}
+
 iptables_backend() {
     local command_name=${1:-iptables}
     local version
@@ -148,6 +158,9 @@ normalize_config() {
     ENABLE_EGRESS_FILTERING=${ENABLE_EGRESS_FILTERING:-no}
     BLOCK_SMTP_OUT=${BLOCK_SMTP_OUT:-yes}
     BLOCK_PRIVATE_DESTINATIONS=${BLOCK_PRIVATE_DESTINATIONS:-yes}
+    ENABLE_DROP_LOGGING=${ENABLE_DROP_LOGGING:-no}
+    DROP_LOG_RATE=${DROP_LOG_RATE:-3/min}
+    DROP_LOG_BURST=${DROP_LOG_BURST:-10}
     ENABLE_FAIL2BAN=${ENABLE_FAIL2BAN:-no}
     ENABLE_SYSCTL_HARDENING=${ENABLE_SYSCTL_HARDENING:-yes}
     RP_FILTER=${RP_FILTER:-2}
@@ -227,6 +240,10 @@ fi
 check_numeric_range_health "$RP_FILTER" "RP_FILTER" 0 2
 check_numeric_range_health "$TCP_TIMESTAMPS" "TCP_TIMESTAMPS" 0 1
 check_numeric_range_health "$NF_CONNTRACK_MAX" "NF_CONNTRACK_MAX" 1 999999999
+if [[ "$ENABLE_DROP_LOGGING" =~ ^(yes|y|Y)$ ]]; then
+    check_limit_rate_health "$DROP_LOG_RATE" "DROP_LOG_RATE"
+    check_numeric_range_health "$DROP_LOG_BURST" "DROP_LOG_BURST" 1 1000
+fi
 
 sysctl_value() {
     sysctl -q -n "$1" 2>/dev/null || true
@@ -314,6 +331,12 @@ if ! iptables -C GREX-FORWARD -i "$GRE_IF" -o "$ETH_INTERFACE" -j DROP 2>/dev/nu
     ISSUES+=("Missing anti-spoofing drop rule for unexpected sources from $GRE_IF to $ETH_INTERFACE")
 fi
 
+if [[ "$ENABLE_DROP_LOGGING" =~ ^(yes|y|Y)$ ]] &&
+   ! iptables -S GREX-FORWARD 2>/dev/null | grep -q "GREX FWD SPOOF"; then
+    set_status "WARNING"
+    ISSUES+=("Drop logging is enabled but GREX-FORWARD spoof drop logging rule was not found")
+fi
+
 if [[ "$ENABLE_EGRESS_FILTERING" =~ ^(yes|y|Y)$ ]]; then
     if ! iptables -L GREX-EGRESS -n >/dev/null 2>&1; then
         set_status "WARNING"
@@ -344,6 +367,13 @@ if [[ "$ENABLE_EGRESS_FILTERING" =~ ^(yes|y|Y)$ ]]; then
             fi
         done
     fi
+
+    if [[ "$ENABLE_DROP_LOGGING" =~ ^(yes|y|Y)$ ]] &&
+       { [[ "$BLOCK_SMTP_OUT" =~ ^(yes|y|Y)$ ]] || [[ "$BLOCK_PRIVATE_DESTINATIONS" =~ ^(yes|y|Y)$ ]]; } &&
+       ! iptables -S GREX-EGRESS 2>/dev/null | grep -q "GREX EGRESS"; then
+        set_status "WARNING"
+        ISSUES+=("Drop logging is enabled but GREX-EGRESS logging rule was not found")
+    fi
 fi
 
 # Check firewall hardening state
@@ -363,6 +393,11 @@ if [[ "$ENABLE_HARDENING" =~ ^(yes|y|Y)$ ]]; then
     if [ "$(iptables -S FORWARD 2>/dev/null | awk '/^-P FORWARD/ {print $3}')" != "DROP" ]; then
         set_status "WARNING"
         ISSUES+=("Hardening is enabled but FORWARD policy is not DROP")
+    fi
+    if [[ "$ENABLE_DROP_LOGGING" =~ ^(yes|y|Y)$ ]] &&
+       ! iptables -S GREX-INPUT 2>/dev/null | grep -q "GREX INPUT DROP"; then
+        set_status "WARNING"
+        ISSUES+=("Drop logging is enabled but GREX-INPUT logging rule was not found")
     fi
 fi
 
