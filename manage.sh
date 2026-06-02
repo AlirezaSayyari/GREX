@@ -212,12 +212,29 @@ latest_version_cached() {
     printf "%s" "$latest"
 }
 
+latest_version_fresh() {
+    local latest
+
+    latest=$(fetch_latest_version || true)
+    [ -n "$latest" ] || return 1
+    printf "%s" "$latest" > "$UPDATE_CACHE_FILE" 2>/dev/null || true
+    printf "%s" "$latest"
+}
+
 version_summary() {
+    local mode=${1:-cached}
     local current
     local latest
 
     current=$(installed_version)
-    latest=$(latest_version_cached || true)
+    if [ "$mode" = "fresh" ]; then
+        latest=$(latest_version_fresh || true)
+        if [ -z "$latest" ]; then
+            latest=$(latest_version_cached || true)
+        fi
+    else
+        latest=$(latest_version_cached || true)
+    fi
 
     echo "Installed version: $current"
     if [ -n "$latest" ]; then
@@ -893,12 +910,19 @@ deactivate() {
 }
 
 menu() {
+    local first_render=1
+
     while true; do
         clear
         echo "========================================"
         echo "          GREX Egress Gateway           "
         echo "========================================"
-        version_summary
+        if [ "$first_render" -eq 1 ]; then
+            version_summary fresh
+            first_render=0
+        else
+            version_summary
+        fi
         echo "----------------------------------------"
         echo "1) Help & Introduction"
         echo "2) Configure GREX System (Wizard)"
@@ -996,10 +1020,10 @@ case $COMMAND in
         usage 0
         ;;
     version)
-        version_summary
+        version_summary fresh
         ;;
     check-upgrade)
-        version_summary
+        version_summary fresh
         ;;
     upgrade)
         upgrade_grex

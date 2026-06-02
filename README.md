@@ -486,10 +486,10 @@ sudo grex health
 sudo grex logs
 ```
 
-`sudo grex version` shows the installed version on the server and checks the
-latest GitHub release/tag. `sudo grex upgrade` downloads the latest published
-version, runs `install.sh`, preserves `/etc/gre-tunnel.conf`, and does not run
-the setup wizard again.
+Opening `sudo grex` performs a fresh update check on the first menu render.
+`sudo grex version` also checks the latest GitHub release/tag. `sudo grex
+upgrade` downloads the latest published version, runs `install.sh`, preserves
+`/etc/gre-tunnel.conf`, and does not run the setup wizard again.
 
 GREX stores configuration backups under `/var/backups/grex`. The setup wizard,
 configuration editor, restore flow, and upgrade flow create a backup before
