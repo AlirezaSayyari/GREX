@@ -3,6 +3,7 @@
 # Health Check Script
 
 CONFIG_FILE="/etc/gre-tunnel.conf"
+BACKUP_DIR="/var/backups/grex"
 
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "Configuration file $CONFIG_FILE not found."
@@ -58,6 +59,25 @@ normalize_config() {
 }
 
 normalize_config
+
+CONFIG_MODE=$(stat -c %a "$CONFIG_FILE" 2>/dev/null || true)
+CONFIG_OWNER=$(stat -c %U:%G "$CONFIG_FILE" 2>/dev/null || true)
+if [ "$CONFIG_MODE" != "600" ]; then
+    set_status "WARNING"
+    ISSUES+=("$CONFIG_FILE permissions are $CONFIG_MODE, expected 600")
+fi
+
+if [ -n "$CONFIG_OWNER" ] && [ "$CONFIG_OWNER" != "root:root" ]; then
+    set_status "WARNING"
+    ISSUES+=("$CONFIG_FILE owner is $CONFIG_OWNER, expected root:root")
+fi
+
+LATEST_BACKUP=$(ls -1t "$BACKUP_DIR"/gre-tunnel.conf.*.bak 2>/dev/null | head -n 1 || true)
+if [ -n "$LATEST_BACKUP" ]; then
+    NOTES+=("Latest config backup: $LATEST_BACKUP")
+else
+    NOTES+=("No config backup found in $BACKUP_DIR yet")
+fi
 
 sysctl_value() {
     sysctl -q -n "$1" 2>/dev/null || true

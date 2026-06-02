@@ -14,6 +14,8 @@ echo "🟣 Controlled Egress GRE Tunnel Setup Wizard"
 echo "============================================"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG_FILE="/etc/gre-tunnel.conf"
+BACKUP_DIR="/var/backups/grex"
 INPUT_DEVICE="/dev/stdin"
 if [ ! -t 0 ] && [ -r /dev/tty ]; then
     INPUT_DEVICE="/dev/tty"
@@ -27,6 +29,30 @@ prompt() {
     local input
     read -r -p "$prompt_text [$default_value]: " input < "$INPUT_DEVICE"
     printf -v "$var_name" "%s" "${input:-$default_value}"
+}
+
+secure_config_file() {
+    if [ -f "$CONFIG_FILE" ]; then
+        chown root:root "$CONFIG_FILE" 2>/dev/null || true
+        chmod 600 "$CONFIG_FILE"
+    fi
+}
+
+backup_config() {
+    local reason=${1:-setup}
+    local timestamp
+    local backup_file
+
+    if [ ! -f "$CONFIG_FILE" ]; then
+        return 0
+    fi
+
+    timestamp=$(date +%Y%m%d-%H%M%S)
+    backup_file="$BACKUP_DIR/gre-tunnel.conf.$timestamp.$reason.bak"
+    mkdir -p "$BACKUP_DIR"
+    cp -p "$CONFIG_FILE" "$backup_file"
+    chmod 600 "$backup_file"
+    echo "Existing configuration backed up to $backup_file"
 }
 
 is_ipv4() {
@@ -343,7 +369,8 @@ else
 fi
 
 # Create config file
-cat > /etc/gre-tunnel.conf << EOF
+backup_config "pre-setup"
+cat > "$CONFIG_FILE" << EOF
 VPS_PUBLIC_IP=$VPS_PUBLIC_IP
 REMOTE_PUBLIC_IP=$REMOTE_PUBLIC_IP
 INTERNAL_SUBNETS=$INTERNAL_SUBNETS
@@ -374,8 +401,9 @@ FAIL2BAN_SSHD_MAXRETRY=$FAIL2BAN_SSHD_MAXRETRY
 FAIL2BAN_SSHD_FINDTIME=$FAIL2BAN_SSHD_FINDTIME
 FAIL2BAN_SSHD_BANTIME=$FAIL2BAN_SSHD_BANTIME
 EOF
+secure_config_file
 
-echo "Configuration saved to /etc/gre-tunnel.conf"
+echo "Configuration saved to $CONFIG_FILE"
 
 # Install dependencies
 echo "Installing dependencies..."

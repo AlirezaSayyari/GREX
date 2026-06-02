@@ -3,6 +3,7 @@
 # Check Policies and Routing Script
 
 CONFIG_FILE="/etc/gre-tunnel.conf"
+BACKUP_DIR="/var/backups/grex"
 
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "Configuration file $CONFIG_FILE not found."
@@ -43,6 +44,14 @@ normalize_config() {
 }
 
 normalize_config
+
+echo "0. Config File:"
+echo "Path: $CONFIG_FILE"
+echo "Mode: $(stat -c %a "$CONFIG_FILE" 2>/dev/null || echo unknown)"
+echo "Owner: $(stat -c %U:%G "$CONFIG_FILE" 2>/dev/null || echo unknown)"
+echo "Latest backups:"
+ls -1t "$BACKUP_DIR"/gre-tunnel.conf.*.bak 2>/dev/null | head -5 || echo "No backups found in $BACKUP_DIR"
+echo
 
 # Check tunnel interface
 echo "1. Tunnel Interface:"

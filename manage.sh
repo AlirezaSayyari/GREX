@@ -6,6 +6,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="/etc/gre-tunnel.conf"
+BACKUP_DIR="/var/backups/grex"
 REPO_OWNER="AlirezaSayyari"
 REPO_NAME="GREX"
 REPO_BRANCH="main"
@@ -73,8 +74,70 @@ stop_dnsmasq_if_running() {
 }
 
 usage() {
-    echo "Usage: $0 {help|version|check-upgrade|upgrade|configure|edit|activate|deactivate|enable|disable|start|stop|status|logs|health|check}"
+    echo "Usage: $0 {help|version|check-upgrade|upgrade|backup|restore|configure|edit|activate|deactivate|enable|disable|start|stop|status|logs|health|check}"
     exit "${1:-1}"
+}
+
+secure_config_file() {
+    if [ -f "$CONFIG_FILE" ]; then
+        run_as_root chown root:root "$CONFIG_FILE" 2>/dev/null || true
+        run_as_root chmod 600 "$CONFIG_FILE"
+    fi
+}
+
+backup_config() {
+    local reason=${1:-manual}
+    local timestamp
+    local backup_file
+
+    if [ ! -f "$CONFIG_FILE" ]; then
+        echo "No $CONFIG_FILE found; nothing to back up."
+        return 0
+    fi
+
+    timestamp=$(date +%Y%m%d-%H%M%S)
+    backup_file="$BACKUP_DIR/gre-tunnel.conf.$timestamp.$reason.bak"
+    run_as_root mkdir -p "$BACKUP_DIR"
+    run_as_root cp -p "$CONFIG_FILE" "$backup_file"
+    run_as_root chmod 600 "$backup_file"
+    echo "Backup created: $backup_file"
+}
+
+latest_config_backup() {
+    ls -1t "$BACKUP_DIR"/gre-tunnel.conf.*.bak 2>/dev/null | head -n 1
+}
+
+restore_latest_config_backup() {
+    local backup_file
+    local answer
+
+    backup_file=$(latest_config_backup)
+    if [ -z "$backup_file" ]; then
+        echo "No GREX config backup was found in $BACKUP_DIR."
+        return 1
+    fi
+
+    echo "Latest backup: $backup_file"
+    read -r -p "Restore this backup to $CONFIG_FILE? (yes/no) [no]: " answer
+    if ! [[ "${answer:-no}" =~ ^(yes|y|Y)$ ]]; then
+        echo "Restore cancelled."
+        return 0
+    fi
+
+    backup_config "pre-restore"
+    run_as_root cp "$backup_file" "$CONFIG_FILE"
+    secure_config_file
+    echo "Configuration restored from $backup_file."
+    echo "Use 'sudo grex activate' or the menu apply option to apply it."
+}
+
+list_config_backups() {
+    if ! ls "$BACKUP_DIR"/gre-tunnel.conf.*.bak >/dev/null 2>&1; then
+        echo "No GREX config backups found in $BACKUP_DIR."
+        return 0
+    fi
+
+    ls -1t "$BACKUP_DIR"/gre-tunnel.conf.*.bak
 }
 
 installed_version() {
@@ -215,6 +278,7 @@ upgrade_grex() {
         fi
     fi
 
+    backup_config "pre-upgrade"
     tmp_dir=$(mktemp -d)
     trap 'rm -rf "$tmp_dir"' RETURN
 
@@ -304,6 +368,7 @@ load_config() {
 }
 
 write_config() {
+    backup_config "pre-edit"
     run_as_root bash -c "cat > '$CONFIG_FILE'" << EOF
 VPS_PUBLIC_IP=$VPS_PUBLIC_IP
 REMOTE_PUBLIC_IP=$REMOTE_PUBLIC_IP
@@ -335,6 +400,7 @@ FAIL2BAN_SSHD_MAXRETRY=$FAIL2BAN_SSHD_MAXRETRY
 FAIL2BAN_SSHD_FINDTIME=$FAIL2BAN_SSHD_FINDTIME
 FAIL2BAN_SSHD_BANTIME=$FAIL2BAN_SSHD_BANTIME
 EOF
+    secure_config_file
 }
 
 configure_dnsmasq_file() {
@@ -582,9 +648,10 @@ menu() {
         echo "6) Health Check"
         echo "7) Logs"
         echo "8) Upgrade GREX"
+        echo "9) Backup / Restore Config"
         echo "0) Exit"
         echo
-        read -p "Choose an option [0-8]: " choice
+        read -p "Choose an option [0-9]: " choice
         case "$choice" in
             1)
                 echo
@@ -631,6 +698,22 @@ menu() {
                 upgrade_grex
                 read -p "Press Enter to continue..." _
                 ;;
+            9)
+                echo "=== GREX config backups ==="
+                list_config_backups
+                echo
+                echo "1) Create backup now"
+                echo "2) Restore latest backup"
+                echo "0) Back"
+                read -r -p "Choose an option [0-2]: " backup_choice
+                case "$backup_choice" in
+                    1) backup_config "manual" ;;
+                    2) restore_latest_config_backup ;;
+                    0) ;;
+                    *) echo "Invalid selection." ;;
+                esac
+                read -p "Press Enter to continue..." _
+                ;;
             0)
                 exit 0
                 ;;
@@ -660,6 +743,12 @@ case $COMMAND in
         ;;
     upgrade)
         upgrade_grex
+        ;;
+    backup)
+        backup_config "manual"
+        ;;
+    restore)
+        restore_latest_config_backup
         ;;
     configure)
         run_configure

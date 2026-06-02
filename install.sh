@@ -7,6 +7,7 @@ set -e
 INSTALL_DIR="/srv/GREX"
 BIN_DIR="/usr/local/bin"
 SYSTEMD_DIR="/etc/systemd/system"
+CONFIG_FILE="/etc/gre-tunnel.conf"
 
 run_as_root() {
     if [ "$EUID" -ne 0 ]; then
@@ -57,6 +58,11 @@ run_as_root chmod +x "$BIN_DIR/grex"
 
 if [ ! -e /usr/bin/grex ] && [ -d /usr/bin ]; then
     run_as_root ln -s "$BIN_DIR/grex" /usr/bin/grex
+fi
+
+if [ -f "$CONFIG_FILE" ]; then
+    run_as_root chown root:root "$CONFIG_FILE" 2>/dev/null || true
+    run_as_root chmod 600 "$CONFIG_FILE"
 fi
 
 # Copy service file

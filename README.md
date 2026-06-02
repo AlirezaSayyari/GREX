@@ -424,6 +424,7 @@ From the menu you can:
 - Health Check
 - Logs
 - Upgrade GREX to the latest published version
+- Back up and restore the GREX config
 
 Command-line aliases still work too:
 
@@ -433,6 +434,8 @@ sudo grex edit
 sudo grex version
 sudo grex check-upgrade
 sudo grex upgrade
+sudo grex backup
+sudo grex restore
 sudo grex activate
 sudo grex deactivate
 sudo grex health
@@ -443,6 +446,11 @@ sudo grex logs
 latest GitHub release/tag. `sudo grex upgrade` downloads the latest published
 version, runs `install.sh`, preserves `/etc/gre-tunnel.conf`, and does not run
 the setup wizard again.
+
+GREX stores configuration backups under `/var/backups/grex`. The setup wizard,
+configuration editor, restore flow, and upgrade flow create a backup before
+changing sensitive state. `/etc/gre-tunnel.conf` is kept as `root:root` with
+`600` permissions.
 
 ---
 
