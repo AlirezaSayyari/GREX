@@ -497,6 +497,12 @@ validate_configuration() {
     validate_numeric_range "$RP_FILTER" "RP_FILTER" 0 2 || return 1
     validate_numeric_range "$TCP_TIMESTAMPS" "TCP_TIMESTAMPS" 0 1 || return 1
     validate_numeric_range "$NF_CONNTRACK_MAX" "NF_CONNTRACK_MAX" 1 999999999 || return 1
+    validate_numeric_range "$CONNTRACK_WARN_PERCENT" "CONNTRACK_WARN_PERCENT" 1 100 || return 1
+    validate_numeric_range "$CONNTRACK_CRIT_PERCENT" "CONNTRACK_CRIT_PERCENT" 1 100 || return 1
+    if [ "$CONNTRACK_WARN_PERCENT" -ge "$CONNTRACK_CRIT_PERCENT" ]; then
+        echo "CONNTRACK_WARN_PERCENT must be lower than CONNTRACK_CRIT_PERCENT." >&2
+        return 1
+    fi
 }
 
 confirm_ssh_lockout_risk() {
@@ -559,6 +565,8 @@ normalize_config() {
     LOG_MARTIANS=${LOG_MARTIANS:-yes}
     DISABLE_IPV6=${DISABLE_IPV6:-no}
     NF_CONNTRACK_MAX=${NF_CONNTRACK_MAX:-262144}
+    CONNTRACK_WARN_PERCENT=${CONNTRACK_WARN_PERCENT:-70}
+    CONNTRACK_CRIT_PERCENT=${CONNTRACK_CRIT_PERCENT:-90}
     ENABLE_FAIL2BAN=${ENABLE_FAIL2BAN:-yes}
     FAIL2BAN_SSHD_ENABLED=${FAIL2BAN_SSHD_ENABLED:-true}
     FAIL2BAN_SSHD_PORT=${FAIL2BAN_SSHD_PORT:-22}
@@ -609,6 +617,8 @@ TCP_TIMESTAMPS=$TCP_TIMESTAMPS
 LOG_MARTIANS=$LOG_MARTIANS
 DISABLE_IPV6=$DISABLE_IPV6
 NF_CONNTRACK_MAX=$NF_CONNTRACK_MAX
+CONNTRACK_WARN_PERCENT=$CONNTRACK_WARN_PERCENT
+CONNTRACK_CRIT_PERCENT=$CONNTRACK_CRIT_PERCENT
 ENABLE_FAIL2BAN=$ENABLE_FAIL2BAN
 FAIL2BAN_SSHD_ENABLED=$FAIL2BAN_SSHD_ENABLED
 FAIL2BAN_SSHD_PORT=$FAIL2BAN_SSHD_PORT
@@ -780,12 +790,14 @@ edit_config_menu() {
         echo "27) Log martians                  [$LOG_MARTIANS]"
         echo "28) Disable IPv6                  [$DISABLE_IPV6]"
         echo "29) nf_conntrack_max              [$NF_CONNTRACK_MAX]"
-        echo "30) fail2ban enabled              [$ENABLE_FAIL2BAN]"
-        echo "31) fail2ban sshd enabled         [$FAIL2BAN_SSHD_ENABLED]"
-        echo "32) fail2ban sshd port            [$FAIL2BAN_SSHD_PORT]"
-        echo "33) fail2ban maxretry             [$FAIL2BAN_SSHD_MAXRETRY]"
-        echo "34) fail2ban findtime             [$FAIL2BAN_SSHD_FINDTIME]"
-        echo "35) fail2ban bantime              [$FAIL2BAN_SSHD_BANTIME]"
+        echo "30) Conntrack warning percent     [$CONNTRACK_WARN_PERCENT]"
+        echo "31) Conntrack critical percent    [$CONNTRACK_CRIT_PERCENT]"
+        echo "32) fail2ban enabled              [$ENABLE_FAIL2BAN]"
+        echo "33) fail2ban sshd enabled         [$FAIL2BAN_SSHD_ENABLED]"
+        echo "34) fail2ban sshd port            [$FAIL2BAN_SSHD_PORT]"
+        echo "35) fail2ban maxretry             [$FAIL2BAN_SSHD_MAXRETRY]"
+        echo "36) fail2ban findtime             [$FAIL2BAN_SSHD_FINDTIME]"
+        echo "37) fail2ban bantime              [$FAIL2BAN_SSHD_BANTIME]"
         echo "A) Apply saved configuration"
         echo "0) Back"
         echo
@@ -820,12 +832,14 @@ edit_config_menu() {
             27) edit_config_value LOG_MARTIANS "Log martians? (yes/no)" ;;
             28) edit_config_value DISABLE_IPV6 "Disable IPv6? (yes/no)" ;;
             29) edit_config_value NF_CONNTRACK_MAX "nf_conntrack_max" ;;
-            30) edit_config_value ENABLE_FAIL2BAN "Enable fail2ban? (yes/no)" ;;
-            31) edit_config_value FAIL2BAN_SSHD_ENABLED "fail2ban sshd enabled (true/false)" ;;
-            32) edit_config_value FAIL2BAN_SSHD_PORT "fail2ban sshd port" ;;
-            33) edit_config_value FAIL2BAN_SSHD_MAXRETRY "fail2ban maxretry" ;;
-            34) edit_config_value FAIL2BAN_SSHD_FINDTIME "fail2ban findtime" ;;
-            35) edit_config_value FAIL2BAN_SSHD_BANTIME "fail2ban bantime" ;;
+            30) edit_config_value CONNTRACK_WARN_PERCENT "Conntrack usage warning percent" ;;
+            31) edit_config_value CONNTRACK_CRIT_PERCENT "Conntrack usage critical percent" ;;
+            32) edit_config_value ENABLE_FAIL2BAN "Enable fail2ban? (yes/no)" ;;
+            33) edit_config_value FAIL2BAN_SSHD_ENABLED "fail2ban sshd enabled (true/false)" ;;
+            34) edit_config_value FAIL2BAN_SSHD_PORT "fail2ban sshd port" ;;
+            35) edit_config_value FAIL2BAN_SSHD_MAXRETRY "fail2ban maxretry" ;;
+            36) edit_config_value FAIL2BAN_SSHD_FINDTIME "fail2ban findtime" ;;
+            37) edit_config_value FAIL2BAN_SSHD_BANTIME "fail2ban bantime" ;;
             A|a)
                 apply_saved_config
                 read -p "Press Enter to continue..." _

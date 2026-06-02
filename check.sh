@@ -41,6 +41,8 @@ normalize_config() {
     TCP_TIMESTAMPS=${TCP_TIMESTAMPS:-1}
     DISABLE_IPV6=${DISABLE_IPV6:-no}
     NF_CONNTRACK_MAX=${NF_CONNTRACK_MAX:-262144}
+    CONNTRACK_WARN_PERCENT=${CONNTRACK_WARN_PERCENT:-70}
+    CONNTRACK_CRIT_PERCENT=${CONNTRACK_CRIT_PERCENT:-90}
 }
 
 normalize_config
@@ -143,7 +145,24 @@ iptables -t mangle -L GREX-MANGLE -n -v 2>/dev/null || echo "GREX-MANGLE chain n
 echo "MSS mode: $MSS_MODE ${MSS_VALUE:-}"
 
 echo
-echo "5c. Sysctl Hardening:"
+echo "5c. Conntrack Capacity:"
+conntrack_count=$(sysctl -q -n net.netfilter.nf_conntrack_count 2>/dev/null || true)
+conntrack_max=$(sysctl -q -n net.netfilter.nf_conntrack_max 2>/dev/null || true)
+if [ -n "$conntrack_count" ] && [ -n "$conntrack_max" ] && [ "$conntrack_max" -gt 0 ]; then
+    conntrack_percent=$((conntrack_count * 100 / conntrack_max))
+    echo "Usage: $conntrack_count/$conntrack_max (${conntrack_percent}%)"
+    echo "Thresholds: warning ${CONNTRACK_WARN_PERCENT}%, critical ${CONNTRACK_CRIT_PERCENT}%"
+else
+    echo "Conntrack counters are not available on this kernel"
+fi
+if command -v conntrack >/dev/null 2>&1; then
+    conntrack -S 2>/dev/null || true
+else
+    echo "conntrack command not installed; install conntrack-tools for protocol counters"
+fi
+
+echo
+echo "5d. Sysctl Hardening:"
 if [[ "$ENABLE_SYSCTL_HARDENING" =~ ^(yes|y|Y)$ ]]; then
     echo "Sysctl hardening is enabled in GREX config"
     echo "Profile: $SYSCTL_PROFILE"
@@ -170,7 +189,7 @@ else
 fi
 
 echo
-echo "5d. fail2ban:"
+echo "5e. fail2ban:"
 if [[ "$ENABLE_FAIL2BAN" =~ ^(yes|y|Y)$ ]]; then
     echo "fail2ban is enabled in GREX config"
     cat /etc/fail2ban/jail.d/grex-sshd.local 2>/dev/null || echo "GREX fail2ban jail not found"

@@ -166,6 +166,8 @@ normalize_config() {
     RP_FILTER=${RP_FILTER:-2}
     TCP_TIMESTAMPS=${TCP_TIMESTAMPS:-1}
     NF_CONNTRACK_MAX=${NF_CONNTRACK_MAX:-262144}
+    CONNTRACK_WARN_PERCENT=${CONNTRACK_WARN_PERCENT:-70}
+    CONNTRACK_CRIT_PERCENT=${CONNTRACK_CRIT_PERCENT:-90}
 }
 
 normalize_config
@@ -240,6 +242,14 @@ fi
 check_numeric_range_health "$RP_FILTER" "RP_FILTER" 0 2
 check_numeric_range_health "$TCP_TIMESTAMPS" "TCP_TIMESTAMPS" 0 1
 check_numeric_range_health "$NF_CONNTRACK_MAX" "NF_CONNTRACK_MAX" 1 999999999
+check_numeric_range_health "$CONNTRACK_WARN_PERCENT" "CONNTRACK_WARN_PERCENT" 1 100
+check_numeric_range_health "$CONNTRACK_CRIT_PERCENT" "CONNTRACK_CRIT_PERCENT" 1 100
+if [[ "$CONNTRACK_WARN_PERCENT" =~ ^[0-9]+$ ]] &&
+   [[ "$CONNTRACK_CRIT_PERCENT" =~ ^[0-9]+$ ]] &&
+   [ "$CONNTRACK_WARN_PERCENT" -ge "$CONNTRACK_CRIT_PERCENT" ]; then
+    set_status "CRITICAL"
+    ISSUES+=("CONNTRACK_WARN_PERCENT must be lower than CONNTRACK_CRIT_PERCENT")
+fi
 if [[ "$ENABLE_DROP_LOGGING" =~ ^(yes|y|Y)$ ]]; then
     check_limit_rate_health "$DROP_LOG_RATE" "DROP_LOG_RATE"
     check_numeric_range_health "$DROP_LOG_BURST" "DROP_LOG_BURST" 1 1000
@@ -431,6 +441,28 @@ if [[ "$ENABLE_SYSCTL_HARDENING" =~ ^(yes|y|Y)$ ]]; then
         set_status "WARNING"
         ISSUES+=("Sysctl net.netfilter.nf_conntrack_max is $current_conntrack_max, expected at least $NF_CONNTRACK_MAX")
     fi
+fi
+
+current_conntrack_count=$(sysctl_value net.netfilter.nf_conntrack_count)
+current_conntrack_max=${current_conntrack_max:-$(sysctl_value net.netfilter.nf_conntrack_max)}
+if [ -n "$current_conntrack_count" ] && [ -n "$current_conntrack_max" ] && [ "$current_conntrack_max" -gt 0 ]; then
+    conntrack_usage_percent=$((current_conntrack_count * 100 / current_conntrack_max))
+    NOTES+=("Conntrack usage: $current_conntrack_count/$current_conntrack_max (${conntrack_usage_percent}%)")
+    if [[ "$CONNTRACK_WARN_PERCENT" =~ ^[0-9]+$ ]] &&
+       [[ "$CONNTRACK_CRIT_PERCENT" =~ ^[0-9]+$ ]] &&
+       [ "$CONNTRACK_WARN_PERCENT" -lt "$CONNTRACK_CRIT_PERCENT" ] &&
+       [ "$conntrack_usage_percent" -ge "$CONNTRACK_CRIT_PERCENT" ]; then
+        set_status "CRITICAL"
+        ISSUES+=("Conntrack usage is ${conntrack_usage_percent}%, critical threshold is ${CONNTRACK_CRIT_PERCENT}%")
+    elif [[ "$CONNTRACK_WARN_PERCENT" =~ ^[0-9]+$ ]] &&
+         [[ "$CONNTRACK_CRIT_PERCENT" =~ ^[0-9]+$ ]] &&
+         [ "$CONNTRACK_WARN_PERCENT" -lt "$CONNTRACK_CRIT_PERCENT" ] &&
+         [ "$conntrack_usage_percent" -ge "$CONNTRACK_WARN_PERCENT" ]; then
+        set_status "WARNING"
+        ISSUES+=("Conntrack usage is ${conntrack_usage_percent}%, warning threshold is ${CONNTRACK_WARN_PERCENT}%")
+    fi
+else
+    NOTES+=("Conntrack usage counters are not available on this kernel")
 fi
 
 if [ "$MSS_MODE" = "fixed" ]; then

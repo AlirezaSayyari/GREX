@@ -367,6 +367,7 @@ profile keeps compatibility with GRE/NAT gateways:
 - keeps TCP timestamps enabled by default
 - leaves IPv6 enabled unless you explicitly disable it
 - sets `nf_conntrack_max` when the kernel exposes that sysctl
+- checks conntrack table usage against configurable warning and critical thresholds
 
 Use the `strict` profile only when you know the GRE path is symmetric. It sets
 `rp_filter=1`, which can break valid routed or tunneled traffic on some paths.
@@ -522,6 +523,21 @@ sudo iptables -S GREX-FORWARD | grep -- '-j LOG'
 sudo iptables -S GREX-EGRESS | grep -- '-j LOG'
 sudo iptables -S GREX-INPUT | grep -- '-j LOG'
 ```
+
+### Conntrack capacity
+
+GREX uses connection tracking for NAT and stateful firewall rules. If the
+conntrack table gets close to full, users can see slow page loads, intermittent
+timeouts, or failed new connections even while the GRE tunnel still appears up.
+
+```bash
+sysctl net.netfilter.nf_conntrack_count
+sysctl net.netfilter.nf_conntrack_max
+sudo conntrack -S
+```
+
+The wizard stores `CONNTRACK_WARN_PERCENT` and `CONNTRACK_CRIT_PERCENT`; health
+check reports usage and raises warnings before the table is exhausted.
 
 ---
 

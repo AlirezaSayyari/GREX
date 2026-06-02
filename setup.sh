@@ -233,6 +233,12 @@ validate_configuration() {
     validate_numeric_range "$RP_FILTER" "RP_FILTER" 0 2 || return 1
     validate_numeric_range "$TCP_TIMESTAMPS" "TCP_TIMESTAMPS" 0 1 || return 1
     validate_numeric_range "$NF_CONNTRACK_MAX" "NF_CONNTRACK_MAX" 1 999999999 || return 1
+    validate_numeric_range "$CONNTRACK_WARN_PERCENT" "CONNTRACK_WARN_PERCENT" 1 100 || return 1
+    validate_numeric_range "$CONNTRACK_CRIT_PERCENT" "CONNTRACK_CRIT_PERCENT" 1 100 || return 1
+    if [ "$CONNTRACK_WARN_PERCENT" -ge "$CONNTRACK_CRIT_PERCENT" ]; then
+        echo "CONNTRACK_WARN_PERCENT must be lower than CONNTRACK_CRIT_PERCENT." >&2
+        return 1
+    fi
 }
 
 confirm_ssh_lockout_risk() {
@@ -545,6 +551,8 @@ if [[ "$ENABLE_SYSCTL_HARDENING" =~ ^(yes|y|Y)$ ]]; then
     esac
     prompt DISABLE_IPV6 "Disable IPv6? (yes/no)" "no"
     prompt NF_CONNTRACK_MAX "nf_conntrack_max" "262144"
+    prompt CONNTRACK_WARN_PERCENT "Conntrack usage warning percent" "70"
+    prompt CONNTRACK_CRIT_PERCENT "Conntrack usage critical percent" "90"
 else
     SYSCTL_PROFILE=off
     RP_FILTER=2
@@ -552,6 +560,8 @@ else
     LOG_MARTIANS=no
     DISABLE_IPV6=no
     NF_CONNTRACK_MAX=262144
+    CONNTRACK_WARN_PERCENT=70
+    CONNTRACK_CRIT_PERCENT=90
 fi
 prompt ENABLE_FAIL2BAN "Enable fail2ban for SSH? (yes/no)" "yes"
 if [[ "$ENABLE_FAIL2BAN" =~ ^(yes|y|Y)$ ]]; then
@@ -603,6 +613,8 @@ TCP_TIMESTAMPS=$TCP_TIMESTAMPS
 LOG_MARTIANS=$LOG_MARTIANS
 DISABLE_IPV6=$DISABLE_IPV6
 NF_CONNTRACK_MAX=$NF_CONNTRACK_MAX
+CONNTRACK_WARN_PERCENT=$CONNTRACK_WARN_PERCENT
+CONNTRACK_CRIT_PERCENT=$CONNTRACK_CRIT_PERCENT
 ENABLE_FAIL2BAN=$ENABLE_FAIL2BAN
 FAIL2BAN_SSHD_ENABLED=$FAIL2BAN_SSHD_ENABLED
 FAIL2BAN_SSHD_PORT=$FAIL2BAN_SSHD_PORT
