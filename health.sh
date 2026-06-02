@@ -290,6 +290,27 @@ if [ "$NAT_MISSING" -eq 1 ]; then
     set_status "WARNING"
 fi
 
+# Check GRE anti-spoofing forward rules
+FORWARD_ALLOW_MISSING=0
+IFS=',' read -ra SUBNETS <<< "$INTERNAL_SUBNETS"
+for subnet in "${SUBNETS[@]}"; do
+    subnet=$(trim "$subnet")
+    [ -n "$subnet" ] || continue
+    if ! iptables -C GREX-FORWARD -i "$GRE_IF" -o "$ETH_INTERFACE" -s "$subnet" -j ACCEPT 2>/dev/null; then
+        FORWARD_ALLOW_MISSING=1
+        ISSUES+=("Missing anti-spoofing allow rule for $subnet from $GRE_IF to $ETH_INTERFACE")
+    fi
+done
+
+if [ "$FORWARD_ALLOW_MISSING" -eq 1 ]; then
+    set_status "WARNING"
+fi
+
+if ! iptables -C GREX-FORWARD -i "$GRE_IF" -o "$ETH_INTERFACE" -j DROP 2>/dev/null; then
+    set_status "WARNING"
+    ISSUES+=("Missing anti-spoofing drop rule for unexpected sources from $GRE_IF to $ETH_INTERFACE")
+fi
+
 # Check firewall hardening state
 if [[ "$ENABLE_HARDENING" =~ ^(yes|y|Y)$ ]]; then
     if [ -z "$ADMIN_IPS" ] || [ "$ADMIN_IPS" = "x.x.x.x" ]; then

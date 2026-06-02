@@ -276,7 +276,9 @@ sudo iptables -t nat -A POSTROUTING -s 172.16.0.0/12 -o eth0 -j MASQUERADE
 ```bash
 sudo iptables -N GREX-FORWARD 2>/dev/null || true
 sudo iptables -I FORWARD 1 -j GREX-FORWARD
-sudo iptables -A GREX-FORWARD -i grex -o eth0 -j ACCEPT
+sudo iptables -A GREX-FORWARD -i grex -o eth0 -s 192.168.0.0/16 -j ACCEPT
+sudo iptables -A GREX-FORWARD -i grex -o eth0 -s 172.16.0.0/12 -j ACCEPT
+sudo iptables -A GREX-FORWARD -i grex -o eth0 -j DROP
 sudo iptables -A GREX-FORWARD -i eth0 -o grex -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 sudo iptables -t mangle -N GREX-MANGLE 2>/dev/null || true
 sudo iptables -t mangle -I FORWARD 1 -j GREX-MANGLE
@@ -368,7 +370,9 @@ to `ignoreip` so your management IPs are not banned.
 If hardening is disabled, the minimal direct forwarding rules are:
 
 ```bash
-sudo iptables -I FORWARD -i grex -o eth0 -j ACCEPT
+sudo iptables -I FORWARD -i grex -o eth0 -s 192.168.0.0/16 -j ACCEPT
+sudo iptables -I FORWARD -i grex -o eth0 -s 172.16.0.0/12 -j ACCEPT
+sudo iptables -A FORWARD -i grex -o eth0 -j DROP
 sudo iptables -I FORWARD -i eth0 -o grex -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 ```
 

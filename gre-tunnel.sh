@@ -396,7 +396,13 @@ done
 echo "Setting up forward rules..."
 setup_forward_chain
 setup_mss_chain
-iptables -A "$GREX_CHAIN" -i "$GRE_IF" -o "$ETH_INTERFACE" -j ACCEPT
+IFS=',' read -ra SUBNETS <<< "$INTERNAL_SUBNETS"
+for subnet in "${SUBNETS[@]}"; do
+    subnet=$(trim "$subnet")
+    [ -n "$subnet" ] || continue
+    iptables -A "$GREX_CHAIN" -i "$GRE_IF" -o "$ETH_INTERFACE" -s "$subnet" -j ACCEPT
+done
+iptables -A "$GREX_CHAIN" -i "$GRE_IF" -o "$ETH_INTERFACE" -j DROP
 iptables -A "$GREX_CHAIN" -i "$ETH_INTERFACE" -o "$GRE_IF" \
   -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 

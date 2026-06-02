@@ -115,6 +115,9 @@ iptables -t nat -L POSTROUTING -n -v | grep MASQUERADE || echo "No NAT rules fou
 echo
 echo "4. Forward Rules:"
 iptables -L FORWARD -n -v | head -20
+echo
+echo "4b. GRE Anti-Spoofing Rules:"
+iptables -L GREX-FORWARD -n -v 2>/dev/null || echo "GREX-FORWARD chain not found"
 
 # Check GRE input rule
 echo
