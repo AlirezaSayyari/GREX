@@ -145,6 +145,9 @@ normalize_config() {
     MSS_VALUE=${MSS_VALUE:-}
     ENABLE_HARDENING=${ENABLE_HARDENING:-no}
     ADMIN_IPS=${ADMIN_IPS:-${ADMIN_IP:-}}
+    ENABLE_EGRESS_FILTERING=${ENABLE_EGRESS_FILTERING:-no}
+    BLOCK_SMTP_OUT=${BLOCK_SMTP_OUT:-yes}
+    BLOCK_PRIVATE_DESTINATIONS=${BLOCK_PRIVATE_DESTINATIONS:-yes}
     ENABLE_FAIL2BAN=${ENABLE_FAIL2BAN:-no}
     ENABLE_SYSCTL_HARDENING=${ENABLE_SYSCTL_HARDENING:-yes}
     RP_FILTER=${RP_FILTER:-2}
@@ -296,9 +299,9 @@ IFS=',' read -ra SUBNETS <<< "$INTERNAL_SUBNETS"
 for subnet in "${SUBNETS[@]}"; do
     subnet=$(trim "$subnet")
     [ -n "$subnet" ] || continue
-    if ! iptables -C GREX-FORWARD -i "$GRE_IF" -o "$ETH_INTERFACE" -s "$subnet" -j ACCEPT 2>/dev/null; then
+    if ! iptables -C GREX-FORWARD -i "$GRE_IF" -o "$ETH_INTERFACE" -s "$subnet" -j GREX-EGRESS 2>/dev/null; then
         FORWARD_ALLOW_MISSING=1
-        ISSUES+=("Missing anti-spoofing allow rule for $subnet from $GRE_IF to $ETH_INTERFACE")
+        ISSUES+=("Missing anti-spoofing egress rule for $subnet from $GRE_IF to $ETH_INTERFACE")
     fi
 done
 
@@ -309,6 +312,38 @@ fi
 if ! iptables -C GREX-FORWARD -i "$GRE_IF" -o "$ETH_INTERFACE" -j DROP 2>/dev/null; then
     set_status "WARNING"
     ISSUES+=("Missing anti-spoofing drop rule for unexpected sources from $GRE_IF to $ETH_INTERFACE")
+fi
+
+if [[ "$ENABLE_EGRESS_FILTERING" =~ ^(yes|y|Y)$ ]]; then
+    if ! iptables -L GREX-EGRESS -n >/dev/null 2>&1; then
+        set_status "WARNING"
+        ISSUES+=("Egress filtering is enabled but GREX-EGRESS chain was not found")
+    fi
+
+    if [[ "$BLOCK_SMTP_OUT" =~ ^(yes|y|Y)$ ]] &&
+       ! iptables -C GREX-EGRESS -p tcp --dport 25 -j DROP 2>/dev/null; then
+        set_status "WARNING"
+        ISSUES+=("Egress filtering is enabled but outbound SMTP port 25 is not blocked")
+    fi
+
+    if [[ "$BLOCK_PRIVATE_DESTINATIONS" =~ ^(yes|y|Y)$ ]]; then
+        for dst in \
+            0.0.0.0/8 \
+            10.0.0.0/8 \
+            100.64.0.0/10 \
+            127.0.0.0/8 \
+            169.254.0.0/16 \
+            172.16.0.0/12 \
+            192.168.0.0/16 \
+            198.18.0.0/15 \
+            224.0.0.0/4 \
+            240.0.0.0/4; do
+            if ! iptables -C GREX-EGRESS -d "$dst" -j DROP 2>/dev/null; then
+                set_status "WARNING"
+                ISSUES+=("Egress filtering is enabled but private destination $dst is not blocked")
+            fi
+        done
+    fi
 fi
 
 # Check firewall hardening state

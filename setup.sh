@@ -491,6 +491,14 @@ else
     ADMIN_IPS=""
     ALLOW_ICMP="yes"
 fi
+prompt ENABLE_EGRESS_FILTERING "Enable optional egress filtering? (yes/no)" "no"
+if [[ "$ENABLE_EGRESS_FILTERING" =~ ^(yes|y|Y)$ ]]; then
+    prompt BLOCK_SMTP_OUT "Block outbound SMTP port 25? (yes/no)" "yes"
+    prompt BLOCK_PRIVATE_DESTINATIONS "Block private/reserved destination ranges? (yes/no)" "yes"
+else
+    BLOCK_SMTP_OUT=yes
+    BLOCK_PRIVATE_DESTINATIONS=yes
+fi
 prompt ENABLE_SYSCTL_HARDENING "Enable kernel/network sysctl hardening? (yes/no)" "yes"
 if [[ "$ENABLE_SYSCTL_HARDENING" =~ ^(yes|y|Y)$ ]]; then
     prompt SYSCTL_PROFILE "Sysctl profile (safe/strict/custom)" "safe"
@@ -559,6 +567,9 @@ MSS_VALUE=$MSS_VALUE
 ENABLE_HARDENING=$ENABLE_HARDENING
 ADMIN_IPS=$ADMIN_IPS
 ALLOW_ICMP=$ALLOW_ICMP
+ENABLE_EGRESS_FILTERING=$ENABLE_EGRESS_FILTERING
+BLOCK_SMTP_OUT=$BLOCK_SMTP_OUT
+BLOCK_PRIVATE_DESTINATIONS=$BLOCK_PRIVATE_DESTINATIONS
 ENABLE_SYSCTL_HARDENING=$ENABLE_SYSCTL_HARDENING
 SYSCTL_PROFILE=$SYSCTL_PROFILE
 RP_FILTER=$RP_FILTER

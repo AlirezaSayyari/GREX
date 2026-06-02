@@ -275,11 +275,18 @@ sudo iptables -t nat -A POSTROUTING -s 172.16.0.0/12 -o eth0 -j MASQUERADE
 
 ```bash
 sudo iptables -N GREX-FORWARD 2>/dev/null || true
+sudo iptables -N GREX-EGRESS 2>/dev/null || true
 sudo iptables -I FORWARD 1 -j GREX-FORWARD
-sudo iptables -A GREX-FORWARD -i grex -o eth0 -s 192.168.0.0/16 -j ACCEPT
-sudo iptables -A GREX-FORWARD -i grex -o eth0 -s 172.16.0.0/12 -j ACCEPT
-sudo iptables -A GREX-FORWARD -i grex -o eth0 -j DROP
 sudo iptables -A GREX-FORWARD -i eth0 -o grex -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+sudo iptables -A GREX-FORWARD -i grex -o eth0 -s 192.168.0.0/16 -j GREX-EGRESS
+sudo iptables -A GREX-FORWARD -i grex -o eth0 -s 172.16.0.0/12 -j GREX-EGRESS
+sudo iptables -A GREX-FORWARD -i grex -o eth0 -j DROP
+# Optional egress filtering examples:
+sudo iptables -A GREX-EGRESS -d 10.0.0.0/8 -j DROP
+sudo iptables -A GREX-EGRESS -d 172.16.0.0/12 -j DROP
+sudo iptables -A GREX-EGRESS -d 192.168.0.0/16 -j DROP
+sudo iptables -A GREX-EGRESS -p tcp --dport 25 -j DROP
+sudo iptables -A GREX-EGRESS -j ACCEPT
 sudo iptables -t mangle -N GREX-MANGLE 2>/dev/null || true
 sudo iptables -t mangle -I FORWARD 1 -j GREX-MANGLE
 sudo iptables -t mangle -A GREX-MANGLE -i grex -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1360
@@ -316,6 +323,14 @@ sudo iptables -A GREX-INPUT -i grex -p tcp --dport 53 -j ACCEPT
 ```
 
 GREX applies these hardening rules automatically when enabled in the wizard.
+
+### Optional egress filtering
+
+GREX can optionally filter traffic leaving the VPS from the GRE tunnel before it
+is NATed to the Internet. This is disabled by default to avoid breaking valid
+workloads. When enabled, GREX can block direct outbound SMTP on TCP port `25`
+and block private/reserved destination ranges from being reached through the
+Internet egress path.
 
 ### 7. Kernel and network hardening
 

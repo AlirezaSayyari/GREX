@@ -9,6 +9,7 @@ fi
 
 CONFIG_FILE="/etc/gre-tunnel.conf"
 GREX_CHAIN="GREX-FORWARD"
+GREX_EGRESS_CHAIN="GREX-EGRESS"
 GREX_MANGLE_CHAIN="GREX-MANGLE"
 
 save_iptables_rules() {
@@ -102,6 +103,8 @@ fi
 delete_rule_if_exists filter FORWARD -j "$GREX_CHAIN"
 iptables -F "$GREX_CHAIN" 2>/dev/null || true
 iptables -X "$GREX_CHAIN" 2>/dev/null || true
+iptables -F "$GREX_EGRESS_CHAIN" 2>/dev/null || true
+iptables -X "$GREX_EGRESS_CHAIN" 2>/dev/null || true
 
 delete_rule_if_exists mangle FORWARD -j "$GREX_MANGLE_CHAIN"
 iptables -t mangle -F "$GREX_MANGLE_CHAIN" 2>/dev/null || true

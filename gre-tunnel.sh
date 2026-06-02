@@ -14,6 +14,7 @@ CONFIG_FILE="/etc/gre-tunnel.conf"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GREX_INPUT_CHAIN="GREX-INPUT"
 GREX_CHAIN="GREX-FORWARD"
+GREX_EGRESS_CHAIN="GREX-EGRESS"
 GREX_MANGLE_CHAIN="GREX-MANGLE"
 
 save_iptables_rules() {
@@ -65,6 +66,9 @@ normalize_config() {
     ENABLE_HARDENING=${ENABLE_HARDENING:-no}
     ADMIN_IPS=${ADMIN_IPS:-${ADMIN_IP:-}}
     ALLOW_ICMP=${ALLOW_ICMP:-yes}
+    ENABLE_EGRESS_FILTERING=${ENABLE_EGRESS_FILTERING:-no}
+    BLOCK_SMTP_OUT=${BLOCK_SMTP_OUT:-yes}
+    BLOCK_PRIVATE_DESTINATIONS=${BLOCK_PRIVATE_DESTINATIONS:-yes}
 }
 
 trim() {
@@ -255,9 +259,37 @@ delete_rule_if_exists() {
 setup_forward_chain() {
     iptables -N "$GREX_CHAIN" 2>/dev/null || true
     iptables -F "$GREX_CHAIN"
+    iptables -N "$GREX_EGRESS_CHAIN" 2>/dev/null || true
+    iptables -F "$GREX_EGRESS_CHAIN"
 
     delete_rule_if_exists filter FORWARD -j "$GREX_CHAIN"
     iptables -I FORWARD 1 -j "$GREX_CHAIN"
+}
+
+setup_egress_chain() {
+    if [[ "$ENABLE_EGRESS_FILTERING" =~ ^(yes|y|Y)$ ]]; then
+        if [[ "$BLOCK_PRIVATE_DESTINATIONS" =~ ^(yes|y|Y)$ ]]; then
+            for dst in \
+                0.0.0.0/8 \
+                10.0.0.0/8 \
+                100.64.0.0/10 \
+                127.0.0.0/8 \
+                169.254.0.0/16 \
+                172.16.0.0/12 \
+                192.168.0.0/16 \
+                198.18.0.0/15 \
+                224.0.0.0/4 \
+                240.0.0.0/4; do
+                iptables -A "$GREX_EGRESS_CHAIN" -d "$dst" -j DROP
+            done
+        fi
+
+        if [[ "$BLOCK_SMTP_OUT" =~ ^(yes|y|Y)$ ]]; then
+            iptables -A "$GREX_EGRESS_CHAIN" -p tcp --dport 25 -j DROP
+        fi
+    fi
+
+    iptables -A "$GREX_EGRESS_CHAIN" -j ACCEPT
 }
 
 setup_mss_chain() {
@@ -395,16 +427,17 @@ done
 # Forward rules
 echo "Setting up forward rules..."
 setup_forward_chain
+setup_egress_chain
 setup_mss_chain
+iptables -A "$GREX_CHAIN" -i "$ETH_INTERFACE" -o "$GRE_IF" \
+  -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 IFS=',' read -ra SUBNETS <<< "$INTERNAL_SUBNETS"
 for subnet in "${SUBNETS[@]}"; do
     subnet=$(trim "$subnet")
     [ -n "$subnet" ] || continue
-    iptables -A "$GREX_CHAIN" -i "$GRE_IF" -o "$ETH_INTERFACE" -s "$subnet" -j ACCEPT
+    iptables -A "$GREX_CHAIN" -i "$GRE_IF" -o "$ETH_INTERFACE" -s "$subnet" -j "$GREX_EGRESS_CHAIN"
 done
 iptables -A "$GREX_CHAIN" -i "$GRE_IF" -o "$ETH_INTERFACE" -j DROP
-iptables -A "$GREX_CHAIN" -i "$ETH_INTERFACE" -o "$GRE_IF" \
-  -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 
 # Input hardening and GRE protocol access
 echo "Setting up input firewall rules..."

@@ -118,6 +118,9 @@ iptables -L FORWARD -n -v | head -20
 echo
 echo "4b. GRE Anti-Spoofing Rules:"
 iptables -L GREX-FORWARD -n -v 2>/dev/null || echo "GREX-FORWARD chain not found"
+echo
+echo "4c. GREX Egress Filtering Rules:"
+iptables -L GREX-EGRESS -n -v 2>/dev/null || echo "GREX-EGRESS chain not found"
 
 # Check GRE input rule
 echo
