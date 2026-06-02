@@ -124,6 +124,12 @@ The wizard writes `/etc/gre-tunnel.conf` and applies the configuration
 immediately. If hardening is enabled, firewall rules are applied during the
 wizard run, so make sure the admin SSH source IP is correct.
 
+After the initial wizard, use `sudo grex edit` or menu option `Edit GREX
+Configuration` to change one setting at a time without walking through the full
+setup again. The editor saves each field immediately; choose `Apply saved
+configuration` inside that submenu when you want GREX to restart services and
+apply the saved values.
+
 ### 4. Start services
 
 The wizard applies the configuration automatically. To start or restart later on
@@ -412,6 +418,7 @@ sudo grex
 From the menu you can:
 
 - Configure Egress System (Wizard)
+- Edit Egress System settings one by one
 - Activate Egress System
 - Deactivate Egress System
 - Health Check
@@ -421,6 +428,7 @@ Command-line aliases still work too:
 
 ```bash
 sudo grex configure
+sudo grex edit
 sudo grex activate
 sudo grex deactivate
 sudo grex health
