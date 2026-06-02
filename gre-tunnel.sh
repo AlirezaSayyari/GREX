@@ -53,7 +53,7 @@ normalize_config() {
     MSS_MODE=${MSS_MODE:-clamp}
     MSS_VALUE=${MSS_VALUE:-}
     ENABLE_HARDENING=${ENABLE_HARDENING:-no}
-    ADMIN_IP=${ADMIN_IP:-}
+    ADMIN_IPS=${ADMIN_IPS:-${ADMIN_IP:-}}
     ALLOW_ICMP=${ALLOW_ICMP:-yes}
 }
 
@@ -158,9 +158,9 @@ validate_config() {
     fi
 
     if [[ "$ENABLE_HARDENING" =~ ^(yes|y|Y)$ ]]; then
-        require_config_value "ADMIN_IP"
-        if [ "$ADMIN_IP" = "x.x.x.x" ]; then
-            echo "ADMIN_IP must be set before enabling hardening." >&2
+        require_config_value "ADMIN_IPS"
+        if [ "$ADMIN_IPS" = "x.x.x.x" ]; then
+            echo "ADMIN_IPS must be set before enabling hardening." >&2
             exit 1
         fi
     fi
@@ -222,6 +222,8 @@ insert_rule_if_missing() {
 }
 
 setup_input_hardening() {
+    local admin_ip
+
     if [[ "$ENABLE_HARDENING" =~ ^(yes|y|Y)$ ]]; then
         iptables -N "$GREX_INPUT_CHAIN" 2>/dev/null || true
         iptables -F "$GREX_INPUT_CHAIN"
@@ -237,7 +239,12 @@ setup_input_hardening() {
         fi
 
         append_rule_if_missing filter "$GREX_INPUT_CHAIN" -p 47 -s "$FORTI_PUBLIC_IP" -j ACCEPT
-        append_rule_if_missing filter "$GREX_INPUT_CHAIN" -p tcp --dport 22 -s "$ADMIN_IP" -m conntrack --ctstate NEW -j ACCEPT
+        IFS=',' read -ra ADMIN_SOURCES <<< "$ADMIN_IPS"
+        for admin_ip in "${ADMIN_SOURCES[@]}"; do
+            admin_ip=$(trim "$admin_ip")
+            [ -n "$admin_ip" ] || continue
+            append_rule_if_missing filter "$GREX_INPUT_CHAIN" -p tcp --dport 22 -s "$admin_ip" -m conntrack --ctstate NEW -j ACCEPT
+        done
 
         if [[ "${ENABLE_DNSMASQ:-yes}" =~ ^(yes|y|Y)$ ]]; then
             append_rule_if_missing filter "$GREX_INPUT_CHAIN" -i "$GRE_IF" -p udp --dport 53 -j ACCEPT

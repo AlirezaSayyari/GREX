@@ -40,6 +40,7 @@ normalize_config() {
     MSS_MODE=${MSS_MODE:-clamp}
     MSS_VALUE=${MSS_VALUE:-}
     ENABLE_HARDENING=${ENABLE_HARDENING:-no}
+    ADMIN_IPS=${ADMIN_IPS:-${ADMIN_IP:-}}
 }
 
 normalize_config
@@ -90,6 +91,10 @@ fi
 
 # Check firewall hardening state
 if [[ "$ENABLE_HARDENING" =~ ^(yes|y|Y)$ ]]; then
+    if [ -z "$ADMIN_IPS" ] || [ "$ADMIN_IPS" = "x.x.x.x" ]; then
+        set_status "CRITICAL"
+        ISSUES+=("Hardening is enabled but ADMIN_IPS is not configured")
+    fi
     if ! iptables -C INPUT -j GREX-INPUT 2>/dev/null; then
         set_status "WARNING"
         ISSUES+=("Hardening is enabled but GREX-INPUT is not attached to INPUT")

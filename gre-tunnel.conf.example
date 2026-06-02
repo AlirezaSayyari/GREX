@@ -1,8 +1,8 @@
 # Example GRE Tunnel Configuration
 # Copy this to /etc/gre-tunnel.conf and modify as needed
 
-VPS_PUBLIC_IP=130.x.x.x
-FORTI_PUBLIC_IP=93.x.x.x
+VPS_PUBLIC_IP=x.x.x.x
+FORTI_PUBLIC_IP=x.x.x.x
 INTERNAL_SUBNETS=192.168.0.0/16,172.16.0.0/12
 ENABLE_DNSMASQ=yes
 DNS_SERVERS=1.1.1.1,8.8.8.8
@@ -16,5 +16,5 @@ GRE_MTU=1400
 MSS_MODE=fixed
 MSS_VALUE=1360
 ENABLE_HARDENING=yes
-ADMIN_IP=x.x.x.x
+ADMIN_IPS=x.x.x.x
 ALLOW_ICMP=yes

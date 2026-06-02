@@ -112,7 +112,7 @@ The wizard configures:
 - tunnel IPs and GRE interface name
 - GRE MTU and TCP MSS handling
 - optional VPS firewall hardening
-- admin SSH source IP or CIDR when hardening is enabled
+- admin SSH source IPs/CIDRs when hardening is enabled
 
 The VPS public IP is auto-detected during setup and shown as the default value.
 Press Enter to accept it, or type another IP if the server is behind a special
@@ -282,8 +282,9 @@ reliable on your path. The wizard exposes this as `MSS_MODE`.
 
 ### 6. Harden VPS input and default forwarding
 
-Replace `<ADMIN_IP_OR_CIDR>` before applying these rules. Add allow rules first,
-then set default policies to avoid locking yourself out.
+Replace `<ADMIN_IP_OR_CIDR>` before applying these rules. Repeat the SSH rule
+for every allowed admin source. Add allow rules first, then set default policies
+to avoid locking yourself out.
 
 ```bash
 sudo iptables -N GREX-INPUT 2>/dev/null || true

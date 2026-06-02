@@ -202,7 +202,7 @@ DETECTED_VPS_PUBLIC_IP=$(detect_public_ip || true)
 DETECTED_ETH_INTERFACE=$(detect_default_interface)
 DETECTED_ADMIN_IP=$(detect_admin_ip || true)
 prompt VPS_PUBLIC_IP "VPS Public IP" "${DETECTED_VPS_PUBLIC_IP:-130.x.x.x}"
-prompt FORTI_PUBLIC_IP "FortiGate Public IP" "93.x.x.x"
+prompt FORTI_PUBLIC_IP "FortiGate Public IP" "x.x.x.x"
 prompt INTERNAL_SUBNETS "Internal subnets (comma-separated)" "192.168.0.0/16,172.16.0.0/12"
 prompt ENABLE_DNSMASQ "Enable local DNS server with dnsmasq? (yes/no)" "yes"
 if [[ "$ENABLE_DNSMASQ" =~ ^(yes|y|Y)$ ]]; then
@@ -224,10 +224,10 @@ else
 fi
 prompt ENABLE_HARDENING "Enable VPS firewall hardening? (yes/no)" "yes"
 if [[ "$ENABLE_HARDENING" =~ ^(yes|y|Y)$ ]]; then
-    prompt ADMIN_IP "Admin SSH source IP or CIDR" "${DETECTED_ADMIN_IP:-x.x.x.x}"
+    prompt ADMIN_IPS "Admin SSH source IPs/CIDRs (comma-separated)" "${DETECTED_ADMIN_IP:-x.x.x.x}"
     prompt ALLOW_ICMP "Allow ICMP/ping to VPS? (yes/no)" "yes"
 else
-    ADMIN_IP=""
+    ADMIN_IPS=""
     ALLOW_ICMP="yes"
 fi
 
@@ -247,7 +247,7 @@ GRE_MTU=$GRE_MTU
 MSS_MODE=$MSS_MODE
 MSS_VALUE=$MSS_VALUE
 ENABLE_HARDENING=$ENABLE_HARDENING
-ADMIN_IP=$ADMIN_IP
+ADMIN_IPS=$ADMIN_IPS
 ALLOW_ICMP=$ALLOW_ICMP
 EOF
 
