@@ -257,6 +257,7 @@ upgrade_grex() {
     local tmp_dir
     local source_dir
     local answer
+    local installed_after_upgrade
 
     if ! command -v curl >/dev/null 2>&1; then
         echo "curl is required for upgrade."
@@ -310,6 +311,13 @@ upgrade_grex() {
     echo "Installing updated GREX files..."
     (cd "$source_dir" && run_as_root bash install.sh)
     rm -f "$UPDATE_CACHE_FILE" 2>/dev/null || true
+    installed_after_upgrade=$(installed_version)
+    if [ "$latest" != "$REPO_BRANCH" ] && [ "$installed_after_upgrade" != "$latest" ]; then
+        echo "WARNING: Upgrade target was $latest but installed VERSION is $installed_after_upgrade."
+        echo "The published tag/release may contain an outdated VERSION file."
+        echo "Create a new release with VERSION set to the release tag, then run upgrade again."
+        return 1
+    fi
     echo "Upgrade complete. /etc/gre-tunnel.conf was preserved."
     echo "Run 'sudo grex version' to verify the installed version."
 }
