@@ -456,6 +456,10 @@ GREX validates critical IP, CIDR, MTU, MSS, sysctl, and admin allowlist values
 before saving or activating a configuration. When firewall hardening is enabled,
 GREX also warns if the current SSH source IP is not covered by `ADMIN_IPS`.
 
+GREX reports the active iptables backend in health and check output. If
+`iptables-nft` and `iptables-legacy` both contain GREX/NAT rules, health reports
+a warning because mixed backends can make firewall inspection misleading.
+
 ---
 
 ## Monitoring and Diagnostics

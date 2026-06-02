@@ -99,6 +99,33 @@ check_numeric_range_health() {
     fi
 }
 
+iptables_backend() {
+    local command_name=${1:-iptables}
+    local version
+
+    if ! command -v "$command_name" >/dev/null 2>&1; then
+        printf "missing"
+        return 0
+    fi
+
+    version=$("$command_name" --version 2>/dev/null || true)
+    case "$version" in
+        *nf_tables*) printf "nft" ;;
+        *legacy*) printf "legacy" ;;
+        *) printf "unknown" ;;
+    esac
+}
+
+iptables_rules_present() {
+    local command_name=$1
+
+    command -v "$command_name" >/dev/null 2>&1 || return 1
+    "$command_name" -S 2>/dev/null | grep -q 'GREX-' && return 0
+    "$command_name" -t nat -S 2>/dev/null | grep -q 'MASQUERADE' && return 0
+    "$command_name" -t mangle -S 2>/dev/null | grep -q 'GREX-' && return 0
+    return 1
+}
+
 normalize_config() {
     local legacy_public_var
     local legacy_tunnel_var
@@ -144,6 +171,27 @@ if [ -n "$LATEST_BACKUP" ]; then
     NOTES+=("Latest config backup: $LATEST_BACKUP")
 else
     NOTES+=("No config backup found in $BACKUP_DIR yet")
+fi
+
+ACTIVE_IPTABLES_BACKEND=$(iptables_backend iptables)
+LEGACY_BACKEND=$(iptables_backend iptables-legacy)
+NFT_BACKEND=$(iptables_backend iptables-nft)
+NOTES+=("iptables backend: iptables=$ACTIVE_IPTABLES_BACKEND, iptables-legacy=$LEGACY_BACKEND, iptables-nft=$NFT_BACKEND")
+
+LEGACY_RULES=0
+NFT_RULES=0
+iptables_rules_present iptables-legacy && LEGACY_RULES=1
+iptables_rules_present iptables-nft && NFT_RULES=1
+
+if [ "$LEGACY_RULES" -eq 1 ] && [ "$NFT_RULES" -eq 1 ]; then
+    set_status "WARNING"
+    ISSUES+=("Both iptables-legacy and iptables-nft appear to contain GREX/NAT rules; this mixed backend state can make health checks misleading")
+elif [ "$ACTIVE_IPTABLES_BACKEND" = "nft" ] && [ "$LEGACY_RULES" -eq 1 ]; then
+    set_status "WARNING"
+    ISSUES+=("Active iptables command uses nft, but legacy rules are present; remove legacy rules or switch consistently")
+elif [ "$ACTIVE_IPTABLES_BACKEND" = "legacy" ] && [ "$NFT_RULES" -eq 1 ]; then
+    set_status "WARNING"
+    ISSUES+=("Active iptables command uses legacy, but nft rules are present; remove nft rules or switch consistently")
 fi
 
 [ -n "${VPS_PUBLIC_IP:-}" ] || { set_status "CRITICAL"; ISSUES+=("VPS_PUBLIC_IP is required"); }

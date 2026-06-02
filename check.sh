@@ -45,12 +45,55 @@ normalize_config() {
 
 normalize_config
 
+iptables_backend() {
+    local command_name=${1:-iptables}
+    local version
+
+    if ! command -v "$command_name" >/dev/null 2>&1; then
+        printf "missing"
+        return 0
+    fi
+
+    version=$("$command_name" --version 2>/dev/null || true)
+    case "$version" in
+        *nf_tables*) printf "nft" ;;
+        *legacy*) printf "legacy" ;;
+        *) printf "unknown" ;;
+    esac
+}
+
+iptables_rules_present() {
+    local command_name=$1
+
+    command -v "$command_name" >/dev/null 2>&1 || return 1
+    "$command_name" -S 2>/dev/null | grep -q 'GREX-' && return 0
+    "$command_name" -t nat -S 2>/dev/null | grep -q 'MASQUERADE' && return 0
+    "$command_name" -t mangle -S 2>/dev/null | grep -q 'GREX-' && return 0
+    return 1
+}
+
 echo "0. Config File:"
 echo "Path: $CONFIG_FILE"
 echo "Mode: $(stat -c %a "$CONFIG_FILE" 2>/dev/null || echo unknown)"
 echo "Owner: $(stat -c %U:%G "$CONFIG_FILE" 2>/dev/null || echo unknown)"
 echo "Latest backups:"
 ls -1t "$BACKUP_DIR"/gre-tunnel.conf.*.bak 2>/dev/null | head -5 || echo "No backups found in $BACKUP_DIR"
+echo
+
+echo "0b. iptables Backend:"
+echo "iptables:        $(iptables --version 2>/dev/null || echo missing) [$(iptables_backend iptables)]"
+echo "iptables-legacy: $(iptables-legacy --version 2>/dev/null || echo missing) [$(iptables_backend iptables-legacy)]"
+echo "iptables-nft:    $(iptables-nft --version 2>/dev/null || echo missing) [$(iptables_backend iptables-nft)]"
+if iptables_rules_present iptables-legacy; then
+    echo "legacy rules: present"
+else
+    echo "legacy rules: not detected"
+fi
+if iptables_rules_present iptables-nft; then
+    echo "nft rules: present"
+else
+    echo "nft rules: not detected"
+fi
 echo
 
 # Check tunnel interface
