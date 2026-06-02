@@ -6,6 +6,12 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="/etc/gre-tunnel.conf"
+REPO_OWNER="AlirezaSayyari"
+REPO_NAME="GREX"
+REPO_BRANCH="main"
+VERSION_FILE="$SCRIPT_DIR/VERSION"
+UPDATE_CACHE_FILE="/tmp/grex-latest-version"
+UPDATE_CACHE_TTL=3600
 
 run_as_root() {
     if [ "$EUID" -ne 0 ]; then
@@ -67,8 +73,164 @@ stop_dnsmasq_if_running() {
 }
 
 usage() {
-    echo "Usage: $0 {help|configure|edit|activate|deactivate|enable|disable|start|stop|status|logs|health|check}"
+    echo "Usage: $0 {help|version|check-upgrade|upgrade|configure|edit|activate|deactivate|enable|disable|start|stop|status|logs|health|check}"
     exit "${1:-1}"
+}
+
+installed_version() {
+    if [ -f "$VERSION_FILE" ]; then
+        tr -d '[:space:]' < "$VERSION_FILE"
+    else
+        printf "unknown"
+    fi
+}
+
+normalize_version() {
+    local version=$1
+    version=${version#v}
+    version=${version#V}
+    printf "%s" "$version"
+}
+
+version_gt() {
+    local left
+    local right
+
+    left=$(normalize_version "$1")
+    right=$(normalize_version "$2")
+
+    if command -v sort >/dev/null 2>&1; then
+        [ "$(printf '%s\n%s\n' "$right" "$left" | sort -V | tail -n 1)" = "$left" ] && [ "$left" != "$right" ]
+    else
+        [ "$1" != "$2" ]
+    fi
+}
+
+fetch_latest_version() {
+    local api_url
+    local response
+    local latest
+
+    if ! command -v curl >/dev/null 2>&1; then
+        return 1
+    fi
+
+    api_url="https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest"
+    response=$(curl -fsSL --connect-timeout 3 --max-time 8 "$api_url" 2>/dev/null || true)
+    latest=$(printf "%s" "$response" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
+
+    if [ -z "$latest" ]; then
+        api_url="https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/tags"
+        response=$(curl -fsSL --connect-timeout 3 --max-time 8 "$api_url" 2>/dev/null || true)
+        latest=$(printf "%s" "$response" | sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
+    fi
+
+    [ -n "$latest" ] || return 1
+    printf "%s" "$latest"
+}
+
+latest_version_cached() {
+    local now
+    local cache_mtime
+    local latest
+
+    now=$(date +%s)
+    if [ -f "$UPDATE_CACHE_FILE" ]; then
+        cache_mtime=$(stat -c %Y "$UPDATE_CACHE_FILE" 2>/dev/null || echo 0)
+        if [ $((now - cache_mtime)) -lt "$UPDATE_CACHE_TTL" ]; then
+            tr -d '[:space:]' < "$UPDATE_CACHE_FILE"
+            return 0
+        fi
+    fi
+
+    latest=$(fetch_latest_version || true)
+    [ -n "$latest" ] || return 1
+    printf "%s" "$latest" > "$UPDATE_CACHE_FILE" 2>/dev/null || true
+    printf "%s" "$latest"
+}
+
+version_summary() {
+    local current
+    local latest
+
+    current=$(installed_version)
+    latest=$(latest_version_cached || true)
+
+    echo "Installed version: $current"
+    if [ -n "$latest" ]; then
+        echo "Latest version:    $latest"
+        if [ "$current" != "unknown" ] && version_gt "$latest" "$current"; then
+            echo "Update status:     update available"
+        else
+            echo "Update status:     up to date"
+        fi
+    else
+        echo "Latest version:    unavailable"
+        echo "Update status:     could not check GitHub"
+    fi
+}
+
+upgrade_grex() {
+    local current
+    local latest
+    local source_url
+    local tmp_dir
+    local source_dir
+    local answer
+
+    if ! command -v curl >/dev/null 2>&1; then
+        echo "curl is required for upgrade."
+        return 1
+    fi
+
+    if ! command -v tar >/dev/null 2>&1; then
+        echo "tar is required for upgrade."
+        return 1
+    fi
+
+    current=$(installed_version)
+    latest=$(fetch_latest_version || true)
+    if [ -z "$latest" ]; then
+        echo "Could not find a GitHub release/tag. Falling back to branch '$REPO_BRANCH'."
+        latest="$REPO_BRANCH"
+        source_url="https://github.com/$REPO_OWNER/$REPO_NAME/archive/refs/heads/$REPO_BRANCH.tar.gz"
+    else
+        source_url="https://github.com/$REPO_OWNER/$REPO_NAME/archive/refs/tags/$latest.tar.gz"
+    fi
+
+    echo "Installed version: $current"
+    echo "Target version:    $latest"
+
+    if [ "$current" != "unknown" ] && [ "$latest" != "$REPO_BRANCH" ] && ! version_gt "$latest" "$current"; then
+        read -r -p "No newer version detected. Reinstall target anyway? (yes/no) [no]: " answer
+        if ! [[ "${answer:-no}" =~ ^(yes|y|Y)$ ]]; then
+            echo "Upgrade cancelled."
+            return 0
+        fi
+    else
+        read -r -p "Upgrade GREX now? (yes/no) [yes]: " answer
+        if ! [[ "${answer:-yes}" =~ ^(yes|y|Y)$ ]]; then
+            echo "Upgrade cancelled."
+            return 0
+        fi
+    fi
+
+    tmp_dir=$(mktemp -d)
+    trap 'rm -rf "$tmp_dir"' RETURN
+
+    echo "Downloading $source_url"
+    curl -fsSL "$source_url" | tar -xz -C "$tmp_dir"
+    source_dir=$(find "$tmp_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+    if [ -z "$source_dir" ] || [ ! -f "$source_dir/install.sh" ]; then
+        echo "Downloaded archive does not contain install.sh."
+        return 1
+    fi
+
+    echo "Installing updated GREX files..."
+    (cd "$source_dir" && run_as_root bash install.sh)
+    rm -f "$UPDATE_CACHE_FILE" 2>/dev/null || true
+    echo "Upgrade complete. /etc/gre-tunnel.conf was preserved."
+    echo "Run 'sudo grex version' to verify the installed version."
 }
 
 run_configure() {
@@ -410,6 +572,8 @@ menu() {
         echo "========================================"
         echo "          GREX Egress Gateway           "
         echo "========================================"
+        version_summary
+        echo "----------------------------------------"
         echo "1) Help & Introduction"
         echo "2) Configure GREX System (Wizard)"
         echo "3) Edit GREX Configuration"
@@ -417,9 +581,10 @@ menu() {
         echo "5) Deactivate GREX System"
         echo "6) Health Check"
         echo "7) Logs"
+        echo "8) Upgrade GREX"
         echo "0) Exit"
         echo
-        read -p "Choose an option [0-7]: " choice
+        read -p "Choose an option [0-8]: " choice
         case "$choice" in
             1)
                 echo
@@ -462,6 +627,10 @@ menu() {
                 fi
                 read -p "Press Enter to continue..." _
                 ;;
+            8)
+                upgrade_grex
+                read -p "Press Enter to continue..." _
+                ;;
             0)
                 exit 0
                 ;;
@@ -482,6 +651,15 @@ COMMAND=$1
 case $COMMAND in
     help)
         usage 0
+        ;;
+    version)
+        version_summary
+        ;;
+    check-upgrade)
+        version_summary
+        ;;
+    upgrade)
+        upgrade_grex
         ;;
     configure)
         run_configure

@@ -37,6 +37,7 @@ run_as_root cp install.sh "$INSTALL_DIR/"
 run_as_root cp bootstrap.sh "$INSTALL_DIR/" 2>/dev/null || true
 run_as_root cp gre-tunnel.service "$INSTALL_DIR/"
 run_as_root cp gre-tunnel.conf.example "$INSTALL_DIR/"
+run_as_root cp VERSION "$INSTALL_DIR/" 2>/dev/null || true
 run_as_root cp README.md "$INSTALL_DIR/"
 
 # Make executable
@@ -72,4 +73,7 @@ fi
 
 echo "Installation complete."
 echo "Installed to $INSTALL_DIR."
+if [ -f "$INSTALL_DIR/VERSION" ]; then
+    echo "Version: $(tr -d '[:space:]' < "$INSTALL_DIR/VERSION")"
+fi
 echo "Run 'sudo grex' to manage the tunnel service or 'sudo grex configure' to configure."

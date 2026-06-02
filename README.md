@@ -423,17 +423,26 @@ From the menu you can:
 - Deactivate Egress System
 - Health Check
 - Logs
+- Upgrade GREX to the latest published version
 
 Command-line aliases still work too:
 
 ```bash
 sudo grex configure
 sudo grex edit
+sudo grex version
+sudo grex check-upgrade
+sudo grex upgrade
 sudo grex activate
 sudo grex deactivate
 sudo grex health
 sudo grex logs
 ```
+
+`sudo grex version` shows the installed version on the server and checks the
+latest GitHub release/tag. `sudo grex upgrade` downloads the latest published
+version, runs `install.sh`, preserves `/etc/gre-tunnel.conf`, and does not run
+the setup wizard again.
 
 ---
 
