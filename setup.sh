@@ -213,12 +213,24 @@ EOF
     fi
 }
 
+configure_sysctl_hardening() {
+    if [ -x "$SCRIPT_DIR/gre-sysctl.sh" ]; then
+        "$SCRIPT_DIR/gre-sysctl.sh"
+    elif [ -x /srv/GREX/gre-sysctl.sh ]; then
+        /srv/GREX/gre-sysctl.sh
+    else
+        echo "gre-sysctl.sh was not found; skipping sysctl hardening."
+        echo "Run 'sudo grex configure' again after installing the latest GREX files."
+    fi
+}
+
 has_systemd() {
     command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]
 }
 
 apply_configuration() {
     echo "Applying GREX configuration..."
+    configure_sysctl_hardening
 
     if has_systemd && [ -f /etc/systemd/system/gre-tunnel.service ]; then
         systemctl daemon-reload
@@ -256,7 +268,7 @@ DETECTED_VPS_PUBLIC_IP=$(detect_public_ip || true)
 DETECTED_ETH_INTERFACE=$(detect_default_interface)
 DETECTED_ADMIN_IP=$(detect_admin_ip || true)
 prompt VPS_PUBLIC_IP "VPS Public IP" "${DETECTED_VPS_PUBLIC_IP:-130.x.x.x}"
-prompt FORTI_PUBLIC_IP "FortiGate Public IP" "x.x.x.x"
+prompt REMOTE_PUBLIC_IP "Remote gateway public IP" "x.x.x.x"
 prompt INTERNAL_SUBNETS "Internal subnets (comma-separated)" "192.168.0.0/16,172.16.0.0/12"
 prompt ENABLE_DNSMASQ "Enable local DNS server with dnsmasq? (yes/no)" "yes"
 if [[ "$ENABLE_DNSMASQ" =~ ^(yes|y|Y)$ ]]; then
@@ -266,8 +278,8 @@ else
 fi
 prompt ETH_INTERFACE "Ethernet interface" "$DETECTED_ETH_INTERFACE"
 prompt VPS_TUNNEL_IP "VPS tunnel IP with mask" "10.10.10.2/30"
-prompt FORTI_TUNNEL_IP "FortiGate tunnel IP" "10.10.10.1"
-prompt GRE_IF "GRE interface" "gre-forti"
+prompt REMOTE_TUNNEL_IP "Remote gateway tunnel IP" "10.10.10.1"
+prompt GRE_IF "GRE interface" "grex"
 prompt GRE_KEY "GRE key (blank for no key)" ""
 prompt GRE_MTU "GRE interface MTU" "1400"
 prompt MSS_MODE "TCP MSS mode (fixed/clamp/off)" "fixed"
@@ -283,6 +295,37 @@ if [[ "$ENABLE_HARDENING" =~ ^(yes|y|Y)$ ]]; then
 else
     ADMIN_IPS=""
     ALLOW_ICMP="yes"
+fi
+prompt ENABLE_SYSCTL_HARDENING "Enable kernel/network sysctl hardening? (yes/no)" "yes"
+if [[ "$ENABLE_SYSCTL_HARDENING" =~ ^(yes|y|Y)$ ]]; then
+    prompt SYSCTL_PROFILE "Sysctl profile (safe/strict/custom)" "safe"
+    case "$SYSCTL_PROFILE" in
+        strict)
+            RP_FILTER=1
+            TCP_TIMESTAMPS=1
+            LOG_MARTIANS=yes
+            ;;
+        custom)
+            prompt RP_FILTER "rp_filter value (2 loose, 1 strict, 0 off)" "2"
+            prompt TCP_TIMESTAMPS "TCP timestamps (1 on, 0 off)" "1"
+            prompt LOG_MARTIANS "Log martian packets? (yes/no)" "yes"
+            ;;
+        *)
+            SYSCTL_PROFILE=safe
+            RP_FILTER=2
+            TCP_TIMESTAMPS=1
+            LOG_MARTIANS=yes
+            ;;
+    esac
+    prompt DISABLE_IPV6 "Disable IPv6? (yes/no)" "no"
+    prompt NF_CONNTRACK_MAX "nf_conntrack_max" "262144"
+else
+    SYSCTL_PROFILE=off
+    RP_FILTER=2
+    TCP_TIMESTAMPS=1
+    LOG_MARTIANS=no
+    DISABLE_IPV6=no
+    NF_CONNTRACK_MAX=262144
 fi
 prompt ENABLE_FAIL2BAN "Enable fail2ban for SSH? (yes/no)" "yes"
 if [[ "$ENABLE_FAIL2BAN" =~ ^(yes|y|Y)$ ]]; then
@@ -302,13 +345,13 @@ fi
 # Create config file
 cat > /etc/gre-tunnel.conf << EOF
 VPS_PUBLIC_IP=$VPS_PUBLIC_IP
-FORTI_PUBLIC_IP=$FORTI_PUBLIC_IP
+REMOTE_PUBLIC_IP=$REMOTE_PUBLIC_IP
 INTERNAL_SUBNETS=$INTERNAL_SUBNETS
 ENABLE_DNSMASQ=$ENABLE_DNSMASQ
 DNS_SERVERS=$DNS_SERVERS
 ETH_INTERFACE=$ETH_INTERFACE
 VPS_TUNNEL_IP=$VPS_TUNNEL_IP
-FORTI_TUNNEL_IP=$FORTI_TUNNEL_IP
+REMOTE_TUNNEL_IP=$REMOTE_TUNNEL_IP
 GRE_IF=$GRE_IF
 GRE_KEY=$GRE_KEY
 GRE_MTU=$GRE_MTU
@@ -317,6 +360,13 @@ MSS_VALUE=$MSS_VALUE
 ENABLE_HARDENING=$ENABLE_HARDENING
 ADMIN_IPS=$ADMIN_IPS
 ALLOW_ICMP=$ALLOW_ICMP
+ENABLE_SYSCTL_HARDENING=$ENABLE_SYSCTL_HARDENING
+SYSCTL_PROFILE=$SYSCTL_PROFILE
+RP_FILTER=$RP_FILTER
+TCP_TIMESTAMPS=$TCP_TIMESTAMPS
+LOG_MARTIANS=$LOG_MARTIANS
+DISABLE_IPV6=$DISABLE_IPV6
+NF_CONNTRACK_MAX=$NF_CONNTRACK_MAX
 ENABLE_FAIL2BAN=$ENABLE_FAIL2BAN
 FAIL2BAN_SSHD_ENABLED=$FAIL2BAN_SSHD_ENABLED
 FAIL2BAN_SSHD_PORT=$FAIL2BAN_SSHD_PORT
@@ -330,15 +380,6 @@ echo "Configuration saved to /etc/gre-tunnel.conf"
 # Install dependencies
 echo "Installing dependencies..."
 install_dependencies
-
-# Enable IP forwarding
-echo "Enabling IP forwarding..."
-sysctl -w net.ipv4.ip_forward=1
-if grep -q '^net.ipv4.ip_forward=' /etc/sysctl.conf 2>/dev/null; then
-    sed -i 's/^net.ipv4.ip_forward=.*/net.ipv4.ip_forward=1/' /etc/sysctl.conf
-else
-    echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
-fi
 
 if command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload 2>/dev/null || true

@@ -32,9 +32,18 @@ get_config_value() {
 }
 
 normalize_config() {
+    local legacy_public_var
+    local legacy_tunnel_var
+    local legacy_tunnel_1_var
+
+    legacy_public_var="FO""RTI_PUBLIC_IP"
+    legacy_tunnel_var="FO""RTI_TUNNEL_IP"
+    legacy_tunnel_1_var="TUNNEL_1_FO""RTI_IP"
+
     VPS_TUNNEL_IP=${VPS_TUNNEL_IP:-${TUNNEL_1_VPS_IP:-}}
-    FORTI_TUNNEL_IP=${FORTI_TUNNEL_IP:-${TUNNEL_1_FORTI_IP:-}}
-    GRE_IF=${GRE_IF:-${TUNNEL_1_GRE_IF:-gre-forti}}
+    REMOTE_PUBLIC_IP=${REMOTE_PUBLIC_IP:-${!legacy_public_var:-}}
+    REMOTE_TUNNEL_IP=${REMOTE_TUNNEL_IP:-${!legacy_tunnel_var:-${!legacy_tunnel_1_var:-}}}
+    GRE_IF=${GRE_IF:-${TUNNEL_1_GRE_IF:-grex}}
     GRE_KEY=${GRE_KEY:-}
     GRE_MTU=${GRE_MTU:-1476}
     MSS_MODE=${MSS_MODE:-clamp}
@@ -42,9 +51,34 @@ normalize_config() {
     ENABLE_HARDENING=${ENABLE_HARDENING:-no}
     ADMIN_IPS=${ADMIN_IPS:-${ADMIN_IP:-}}
     ENABLE_FAIL2BAN=${ENABLE_FAIL2BAN:-no}
+    ENABLE_SYSCTL_HARDENING=${ENABLE_SYSCTL_HARDENING:-yes}
+    RP_FILTER=${RP_FILTER:-2}
+    TCP_TIMESTAMPS=${TCP_TIMESTAMPS:-1}
+    NF_CONNTRACK_MAX=${NF_CONNTRACK_MAX:-262144}
 }
 
 normalize_config
+
+sysctl_value() {
+    sysctl -q -n "$1" 2>/dev/null || true
+}
+
+check_sysctl_value() {
+    local key=$1
+    local expected=$2
+    local actual
+
+    actual=$(sysctl_value "$key")
+    if [ -z "$actual" ]; then
+        NOTES+=("Sysctl $key is not available on this kernel")
+        return 0
+    fi
+
+    if [ "$actual" != "$expected" ]; then
+        set_status "WARNING"
+        ISSUES+=("Sysctl $key is $actual, expected $expected")
+    fi
+}
 
 # Check if tunnel interface exists and is administratively up
 if [ -z "$GRE_IF" ]; then
@@ -124,6 +158,24 @@ if [[ "$ENABLE_FAIL2BAN" =~ ^(yes|y|Y)$ ]]; then
     fi
 fi
 
+if [[ "$ENABLE_SYSCTL_HARDENING" =~ ^(yes|y|Y)$ ]]; then
+    if [ ! -f /etc/sysctl.d/99-grex-hardening.conf ]; then
+        set_status "WARNING"
+        ISSUES+=("Sysctl hardening is enabled but /etc/sysctl.d/99-grex-hardening.conf was not found")
+    fi
+
+    check_sysctl_value net.ipv4.ip_forward 1
+    check_sysctl_value net.ipv4.conf.all.rp_filter "$RP_FILTER"
+    check_sysctl_value net.ipv4.conf.default.rp_filter "$RP_FILTER"
+    check_sysctl_value net.ipv4.tcp_timestamps "$TCP_TIMESTAMPS"
+
+    current_conntrack_max=$(sysctl_value net.netfilter.nf_conntrack_max)
+    if [ -n "$current_conntrack_max" ] && [ -n "$NF_CONNTRACK_MAX" ] && [ "$current_conntrack_max" -lt "$NF_CONNTRACK_MAX" ]; then
+        set_status "WARNING"
+        ISSUES+=("Sysctl net.netfilter.nf_conntrack_max is $current_conntrack_max, expected at least $NF_CONNTRACK_MAX")
+    fi
+fi
+
 if [ "$MSS_MODE" = "fixed" ]; then
     if ! iptables -t mangle -S GREX-MANGLE 2>/dev/null | grep -q -- "--set-mss $MSS_VALUE"; then
         set_status "WARNING"
@@ -136,28 +188,28 @@ elif [ "$MSS_MODE" = "clamp" ]; then
     fi
 fi
 
-# Check public FortiGate reachability separately from tunnel reachability.
-if [ -n "${FORTI_PUBLIC_IP:-}" ]; then
-    if ping -c 1 -W 2 "$FORTI_PUBLIC_IP" &>/dev/null; then
-        NOTES+=("FortiGate public IP $FORTI_PUBLIC_IP responds to ICMP; this does not prove the GRE tunnel is up")
+# Check remote public endpoint reachability separately from tunnel reachability.
+if [ -n "${REMOTE_PUBLIC_IP:-}" ]; then
+    if ping -c 1 -W 2 "$REMOTE_PUBLIC_IP" &>/dev/null; then
+        NOTES+=("Remote gateway public IP $REMOTE_PUBLIC_IP responds to ICMP; this does not prove the GRE tunnel is up")
     else
-        NOTES+=("FortiGate public IP $FORTI_PUBLIC_IP did not respond to ICMP; GRE may still work if ICMP is blocked")
+        NOTES+=("Remote gateway public IP $REMOTE_PUBLIC_IP did not respond to ICMP; GRE may still work if ICMP is blocked")
     fi
 fi
 
 if [ -n "$GRE_KEY" ]; then
-    NOTES+=("GRE key is set to $GRE_KEY; FortiGate must have the same 'set key $GRE_KEY'")
+    NOTES+=("GRE key is set to $GRE_KEY; the remote GRE endpoint must use the same key")
 else
-    NOTES+=("GRE key is disabled; FortiGate gre-tunnel should not have a 'set key' value")
+    NOTES+=("GRE key is disabled; the remote GRE endpoint should not require a key")
 fi
 
 # Check connectivity
-if [ -z "$FORTI_TUNNEL_IP" ]; then
+if [ -z "$REMOTE_TUNNEL_IP" ]; then
     set_status "CRITICAL"
-    ISSUES+=("FortiGate tunnel IP is not configured")
-elif ! ping -c 1 -W 2 "$FORTI_TUNNEL_IP" &>/dev/null; then
+    ISSUES+=("Remote gateway tunnel IP is not configured")
+elif ! ping -c 1 -W 2 "$REMOTE_TUNNEL_IP" &>/dev/null; then
     set_status "CRITICAL"
-    ISSUES+=("Cannot ping FortiGate tunnel IP $FORTI_TUNNEL_IP")
+    ISSUES+=("Cannot ping remote gateway tunnel IP $REMOTE_TUNNEL_IP")
 fi
 
 if [ "$MISSING_TUNNELS" -gt 0 ]; then

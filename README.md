@@ -1,6 +1,6 @@
 # Controlled Egress GRE Tunnel
 
-Selective outbound Internet egress for FortiGate-connected LANs using one GRE tunnel to a Linux VPS.
+Selective outbound Internet egress for routed networks using one GRE tunnel to a Linux VPS.
 
 ---
 
@@ -8,7 +8,7 @@ Selective outbound Internet egress for FortiGate-connected LANs using one GRE tu
 
 This repository provides a complete VPS-side implementation for:
 
-- one GRE tunnel from FortiGate to VPS
+- one GRE tunnel from a remote gateway to VPS
 - routed egress through the VPS
 - NAT for selected internal subnets
 - optional local DNS via `dnsmasq`
@@ -104,7 +104,7 @@ Bootstrap installs the project under `/srv/GREX` and creates `grex` under
 The wizard configures:
 
 - VPS public IP
-- FortiGate public IP
+- remote gateway public IP
 - internal subnets
 - optional local DNS server with `dnsmasq`
 - upstream DNS servers
@@ -113,6 +113,7 @@ The wizard configures:
 - GRE MTU and TCP MSS handling
 - optional VPS firewall hardening
 - admin SSH source IPs/CIDRs when hardening is enabled
+- kernel/network sysctl hardening profile
 - optional fail2ban SSH protection
 
 The VPS public IP is auto-detected during setup and shown as the default value.
@@ -123,7 +124,7 @@ The wizard writes `/etc/gre-tunnel.conf` and applies the configuration
 immediately. If hardening is enabled, firewall rules are applied during the
 wizard run, so make sure the admin SSH source IP is correct.
 
-### 5. Start services
+### 4. Start services
 
 The wizard applies the configuration automatically. To start or restart later on
 systemd-based distributions:
@@ -148,7 +149,7 @@ sudo grex activate
 ```text
 Servers (selected subnets)
         ↓
-FortiGate (Policy-Based Routing)
+Remote gateway / router (policy-based routing)
         ↓
 GRE tunnel
         ↓
@@ -181,43 +182,41 @@ Key benefits:
 
 ---
 
-## FortiGate Configuration
+## Remote Gateway Configuration
 
 ### Create GRE tunnel
 
-Example:
+Vendor syntax differs, but the remote gateway must create a GRE tunnel toward
+the VPS public IP.
+
+Generic values:
 
 ```text
-config system gre-tunnel
- edit toVPS1
-  set interface wan1
-  set remote-gw <VPS_PUBLIC_IP>
- next
-end
+remote public endpoint: <VPS_PUBLIC_IP>
+remote tunnel IP:      10.10.10.1
+VPS tunnel IP:         10.10.10.2
 ```
 
-Assign IP for the Forti side:
+Assign the tunnel IP on the gateway side:
 
 ```text
-toVPS1: 10.10.10.1/32
+GRE peer interface: 10.10.10.1/30 or 10.10.10.1/32 with remote 10.10.10.2
 ```
 
 ### Static route
 
+Route selected traffic, or a default route in a separate routing table, toward
+the VPS tunnel IP.
+
 ```text
-config router static
- edit 1
-  set dst 0.0.0.0/0
-  set gateway 10.10.10.2
-  set device toVPS1
-  set priority 1
- next
-end
+destination: selected internal egress routes or 0.0.0.0/0
+gateway:     10.10.10.2
+interface:   GRE peer interface
 ```
 
 ### Policy-based routing
 
-Apply PBR on FortiGate so selected source subnets use the GRE tunnel.
+Apply PBR on the remote gateway so selected source subnets use the GRE tunnel.
 Example:
 
 ```text
@@ -228,7 +227,8 @@ Gateway: 10.10.10.2
 
 ### Firewall policy
 
-Allow LAN → GRE traffic and disable NAT on FortiGate.
+Allow LAN to GRE traffic on the remote gateway. NAT should normally happen on
+the VPS egress side, not on the remote gateway side.
 
 ---
 
@@ -244,18 +244,18 @@ sudo sysctl -p
 ### 2. Create a GRE tunnel
 
 ```bash
-sudo ip link del gre-forti 2>/dev/null
-sudo ip link add gre-forti type gre local <VPS_PUBLIC_IP> remote <FORTI_PUBLIC_IP> ttl 255
-sudo ip addr add 10.10.10.2/30 dev gre-forti
-sudo ip link set gre-forti mtu 1400
-sudo ip link set gre-forti up
+sudo ip link del grex 2>/dev/null
+sudo ip link add grex type gre local <VPS_PUBLIC_IP> remote <REMOTE_PUBLIC_IP> ttl 255
+sudo ip addr add 10.10.10.2/30 dev grex
+sudo ip link set grex mtu 1400
+sudo ip link set grex up
 ```
 
 ### 3. Add internal routes
 
 ```bash
-sudo ip route add 192.168.0.0/16 dev gre-forti
-sudo ip route add 172.16.0.0/12 dev gre-forti
+sudo ip route add 192.168.0.0/16 dev grex
+sudo ip route add 172.16.0.0/12 dev grex
 ```
 
 ### 4. Configure NAT
@@ -270,12 +270,12 @@ sudo iptables -t nat -A POSTROUTING -s 172.16.0.0/12 -o eth0 -j MASQUERADE
 ```bash
 sudo iptables -N GREX-FORWARD 2>/dev/null || true
 sudo iptables -I FORWARD 1 -j GREX-FORWARD
-sudo iptables -A GREX-FORWARD -i gre-forti -o eth0 -j ACCEPT
-sudo iptables -A GREX-FORWARD -i eth0 -o gre-forti -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+sudo iptables -A GREX-FORWARD -i grex -o eth0 -j ACCEPT
+sudo iptables -A GREX-FORWARD -i eth0 -o grex -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 sudo iptables -t mangle -N GREX-MANGLE 2>/dev/null || true
 sudo iptables -t mangle -I FORWARD 1 -j GREX-MANGLE
-sudo iptables -t mangle -A GREX-MANGLE -i gre-forti -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1360
-sudo iptables -t mangle -A GREX-MANGLE -o gre-forti -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1360
+sudo iptables -t mangle -A GREX-MANGLE -i grex -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1360
+sudo iptables -t mangle -A GREX-MANGLE -o grex -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1360
 ```
 
 Use `--clamp-mss-to-pmtu` instead of `--set-mss 1360` if PMTU discovery is
@@ -293,7 +293,7 @@ sudo iptables -I INPUT 1 -j GREX-INPUT
 sudo iptables -A GREX-INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 sudo iptables -A GREX-INPUT -i lo -j ACCEPT
 sudo iptables -A GREX-INPUT -p icmp -j ACCEPT
-sudo iptables -A GREX-INPUT -p 47 -s <FORTI_PUBLIC_IP> -j ACCEPT
+sudo iptables -A GREX-INPUT -p 47 -s <REMOTE_PUBLIC_IP> -j ACCEPT
 sudo iptables -A GREX-INPUT -p tcp --dport 22 -s <ADMIN_IP_OR_CIDR> -m conntrack --ctstate NEW -j ACCEPT
 sudo iptables -P INPUT DROP
 sudo iptables -P FORWARD DROP
@@ -303,13 +303,44 @@ sudo iptables -P OUTPUT ACCEPT
 If DNS is enabled on the VPS, also allow DNS on the GRE interface:
 
 ```bash
-sudo iptables -A GREX-INPUT -i gre-forti -p udp --dport 53 -j ACCEPT
-sudo iptables -A GREX-INPUT -i gre-forti -p tcp --dport 53 -j ACCEPT
+sudo iptables -A GREX-INPUT -i grex -p udp --dport 53 -j ACCEPT
+sudo iptables -A GREX-INPUT -i grex -p tcp --dport 53 -j ACCEPT
 ```
 
 GREX applies these hardening rules automatically when enabled in the wizard.
 
-### fail2ban SSH Protection
+### 7. Kernel and network hardening
+
+GREX can also generate a dedicated sysctl profile at:
+
+```bash
+/etc/sysctl.d/99-grex-hardening.conf
+```
+
+The wizard exposes this as `ENABLE_SYSCTL_HARDENING`. The default `safe`
+profile keeps compatibility with GRE/NAT gateways:
+
+- enables IPv4 forwarding
+- enables syncookies and common TCP protections
+- disables source routes and ICMP redirects
+- uses `rp_filter=2` loose mode, which is safer for GRE/asymmetric routing than strict mode
+- keeps TCP timestamps enabled by default
+- leaves IPv6 enabled unless you explicitly disable it
+- sets `nf_conntrack_max` when the kernel exposes that sysctl
+
+Use the `strict` profile only when you know the GRE path is symmetric. It sets
+`rp_filter=1`, which can break valid routed or tunneled traffic on some paths.
+
+You can apply this module directly:
+
+```bash
+sudo /srv/GREX/gre-sysctl.sh
+```
+
+`sudo grex configure` and `sudo grex activate` apply it automatically when it is
+enabled.
+
+### 8. fail2ban SSH protection
 
 When enabled in the wizard, GREX writes `/etc/fail2ban/jail.d/grex-sshd.local`
 with these defaults:
@@ -326,22 +357,22 @@ bantime = 1h
 The wizard lets you edit each value and adds the configured admin SSH sources
 to `ignoreip` so your management IPs are not banned.
 
-### 7. Minimal non-hardened forwarding
+### 9. Minimal non-hardened forwarding
 
 If hardening is disabled, the minimal direct forwarding rules are:
 
 ```bash
-sudo iptables -I FORWARD -i gre-forti -o eth0 -j ACCEPT
-sudo iptables -I FORWARD -i eth0 -o gre-forti -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+sudo iptables -I FORWARD -i grex -o eth0 -j ACCEPT
+sudo iptables -I FORWARD -i eth0 -o grex -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 ```
 
-### 8. Allow GRE
+### 10. Allow GRE
 
 ```bash
-sudo iptables -I INPUT -p 47 -s <FORTI_PUBLIC_IP> -j ACCEPT
+sudo iptables -I INPUT -p 47 -s <REMOTE_PUBLIC_IP> -j ACCEPT
 ```
 
-### 9. Persist rules
+### 11. Persist rules
 
 ```bash
 sudo sh -c 'iptables-save > /etc/sysconfig/iptables'
@@ -356,7 +387,7 @@ If DNS is enabled in the wizard, `dnsmasq` is configured automatically for the G
 Example rule file:
 
 ```text
-interface=gre-forti
+interface=grex
 listen-address=10.10.10.2
 server=1.1.1.1
 server=8.8.8.8
@@ -403,13 +434,13 @@ sudo grex logs
 ### Traffic monitoring
 
 ```bash
-tcpdump -ni gre-forti
+tcpdump -ni grex
 ```
 
 ### DNS monitoring
 
 ```bash
-tcpdump -ni gre-forti port 53
+tcpdump -ni grex port 53
 ```
 
 ### NAT and firewall inspection
@@ -424,7 +455,7 @@ sudo iptables -L GREX-FORWARD -n -v
 
 ## Validation
 
-From an internal server behind FortiGate:
+From an internal server behind the remote gateway:
 
 ```bash
 curl ifconfig.io
@@ -441,13 +472,13 @@ Expected output:
 ## Notes
 
 - This solution is designed for environments where outbound traffic must be routed cleanly through a trusted egress VPS.
-- The FortiGate GRE tunnel must use matching key, public endpoints, and tunnel IPs.
+- The remote GRE endpoint must use matching key, public endpoints, and tunnel IPs.
 - Use the wizard for fast deployment; the manual section is provided for reference and troubleshooting.
 
 
 ---
 
-# 🟣 9. Lessons learned
+# Lessons learned
 
 * Proxy ≠ infrastructure solution
 * Routing layer is cleaner
@@ -458,7 +489,7 @@ Expected output:
 
 ---
 
-# 🟣 9. Use cases
+# Use cases
 
 * Docker pull
 * Git clone
@@ -468,9 +499,9 @@ Expected output:
 
 ---
 
-# 🟣 10. Production notes
+# Production notes
 
-* Works with FortiGate
+* Works with GRE-capable gateways
 * Scalable
 * No client config
 * Observable

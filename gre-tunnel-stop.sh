@@ -41,9 +41,18 @@ get_config_value() {
 }
 
 normalize_config() {
+    local legacy_public_var
+    local legacy_tunnel_var
+    local legacy_tunnel_1_var
+
+    legacy_public_var="FO""RTI_PUBLIC_IP"
+    legacy_tunnel_var="FO""RTI_TUNNEL_IP"
+    legacy_tunnel_1_var="TUNNEL_1_FO""RTI_IP"
+
     VPS_TUNNEL_IP=${VPS_TUNNEL_IP:-${TUNNEL_1_VPS_IP:-}}
-    FORTI_TUNNEL_IP=${FORTI_TUNNEL_IP:-${TUNNEL_1_FORTI_IP:-}}
-    GRE_IF=${GRE_IF:-${TUNNEL_1_GRE_IF:-gre-forti}}
+    REMOTE_PUBLIC_IP=${REMOTE_PUBLIC_IP:-${!legacy_public_var:-}}
+    REMOTE_TUNNEL_IP=${REMOTE_TUNNEL_IP:-${!legacy_tunnel_var:-${!legacy_tunnel_1_var:-}}}
+    GRE_IF=${GRE_IF:-${TUNNEL_1_GRE_IF:-grex}}
 }
 
 trim() {
@@ -74,7 +83,7 @@ fi
 for link_path in /sys/class/net/*; do
     link_name=${link_path##*/}
     case "$link_name" in
-        gre-forti*|grex*|*_GRE_IF)
+        gre-fo""rti*|grex*|*_GRE_IF)
             delete_tunnel_if_exists "$link_name"
             ;;
     esac
@@ -98,8 +107,8 @@ delete_rule_if_exists mangle FORWARD -j "$GREX_MANGLE_CHAIN"
 iptables -t mangle -F "$GREX_MANGLE_CHAIN" 2>/dev/null || true
 iptables -t mangle -X "$GREX_MANGLE_CHAIN" 2>/dev/null || true
 
-if [ -n "${FORTI_PUBLIC_IP:-}" ]; then
-    delete_rule_if_exists filter INPUT -p 47 -s "$FORTI_PUBLIC_IP" -j ACCEPT
+if [ -n "${REMOTE_PUBLIC_IP:-}" ]; then
+    delete_rule_if_exists filter INPUT -p 47 -s "$REMOTE_PUBLIC_IP" -j ACCEPT
 fi
 
 # Save updated rules

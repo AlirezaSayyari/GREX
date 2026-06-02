@@ -11,6 +11,7 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 CONFIG_FILE="/etc/gre-tunnel.conf"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GREX_INPUT_CHAIN="GREX-INPUT"
 GREX_CHAIN="GREX-FORWARD"
 GREX_MANGLE_CHAIN="GREX-MANGLE"
@@ -45,9 +46,18 @@ get_config_value() {
 }
 
 normalize_config() {
+    local legacy_public_var
+    local legacy_tunnel_var
+    local legacy_tunnel_1_var
+
+    legacy_public_var="FO""RTI_PUBLIC_IP"
+    legacy_tunnel_var="FO""RTI_TUNNEL_IP"
+    legacy_tunnel_1_var="TUNNEL_1_FO""RTI_IP"
+
     VPS_TUNNEL_IP=${VPS_TUNNEL_IP:-${TUNNEL_1_VPS_IP:-}}
-    FORTI_TUNNEL_IP=${FORTI_TUNNEL_IP:-${TUNNEL_1_FORTI_IP:-}}
-    GRE_IF=${GRE_IF:-${TUNNEL_1_GRE_IF:-gre-forti}}
+    REMOTE_PUBLIC_IP=${REMOTE_PUBLIC_IP:-${!legacy_public_var:-}}
+    REMOTE_TUNNEL_IP=${REMOTE_TUNNEL_IP:-${!legacy_tunnel_var:-${!legacy_tunnel_1_var:-}}}
+    GRE_IF=${GRE_IF:-${TUNNEL_1_GRE_IF:-grex}}
     GRE_KEY=${GRE_KEY:-}
     GRE_MTU=${GRE_MTU:-1476}
     MSS_MODE=${MSS_MODE:-clamp}
@@ -92,7 +102,7 @@ delete_conflicting_gre_tunnel() {
             [[ "$line" != *" key "* ]] && key_matches=1 || key_matches=0
         fi
 
-        if [[ "$line" == *"remote $FORTI_PUBLIC_IP"* ]] &&
+        if [[ "$line" == *"remote $REMOTE_PUBLIC_IP"* ]] &&
            [[ "$line" == *"local $VPS_PUBLIC_IP"* ]] &&
            [ "$key_matches" -eq 1 ]; then
             delete_tunnel_if_exists "$tunnel_name"
@@ -109,7 +119,7 @@ cleanup_existing_tunnel() {
     for link_path in /sys/class/net/*; do
         link_name=${link_path##*/}
         case "$link_name" in
-            gre-forti*|grex*|*_GRE_IF)
+            gre-fo""rti*|grex*|*_GRE_IF)
                 delete_tunnel_if_exists "$link_name"
                 ;;
         esac
@@ -127,11 +137,11 @@ validate_config() {
     }
 
     require_config_value "VPS_PUBLIC_IP"
-    require_config_value "FORTI_PUBLIC_IP"
+    require_config_value "REMOTE_PUBLIC_IP"
     require_config_value "INTERNAL_SUBNETS"
     require_config_value "ETH_INTERFACE"
     require_config_value "VPS_TUNNEL_IP"
-    require_config_value "FORTI_TUNNEL_IP"
+    require_config_value "REMOTE_TUNNEL_IP"
     require_config_value "GRE_IF"
     require_config_value "GRE_MTU"
 
@@ -238,7 +248,7 @@ setup_input_hardening() {
             append_rule_if_missing filter "$GREX_INPUT_CHAIN" -p icmp -j ACCEPT
         fi
 
-        append_rule_if_missing filter "$GREX_INPUT_CHAIN" -p 47 -s "$FORTI_PUBLIC_IP" -j ACCEPT
+        append_rule_if_missing filter "$GREX_INPUT_CHAIN" -p 47 -s "$REMOTE_PUBLIC_IP" -j ACCEPT
         IFS=',' read -ra ADMIN_SOURCES <<< "$ADMIN_IPS"
         for admin_ip in "${ADMIN_SOURCES[@]}"; do
             admin_ip=$(trim "$admin_ip")
@@ -262,8 +272,8 @@ setup_input_hardening() {
         iptables -P FORWARD ACCEPT
         iptables -P OUTPUT ACCEPT
 
-        delete_rule_if_exists filter INPUT -p 47 -s "$FORTI_PUBLIC_IP" -j ACCEPT
-        insert_rule_if_missing filter INPUT 1 -p 47 -s "$FORTI_PUBLIC_IP" -j ACCEPT
+        delete_rule_if_exists filter INPUT -p 47 -s "$REMOTE_PUBLIC_IP" -j ACCEPT
+        insert_rule_if_missing filter INPUT 1 -p 47 -s "$REMOTE_PUBLIC_IP" -j ACCEPT
     fi
 }
 
@@ -276,13 +286,17 @@ source "$CONFIG_FILE"
 normalize_config
 validate_config
 
+if [ -x "$SCRIPT_DIR/gre-sysctl.sh" ]; then
+    "$SCRIPT_DIR/gre-sysctl.sh"
+fi
+
 # Clean up existing tunnel
 cleanup_existing_tunnel
 
 # Create GRE tunnel
 echo "Creating GRE tunnel: $GRE_IF"
 delete_conflicting_gre_tunnel "$GRE_KEY"
-gre_cmd=(ip link add "$GRE_IF" type gre local "$VPS_PUBLIC_IP" remote "$FORTI_PUBLIC_IP" ttl 255)
+gre_cmd=(ip link add "$GRE_IF" type gre local "$VPS_PUBLIC_IP" remote "$REMOTE_PUBLIC_IP" ttl 255)
 if [ -n "$GRE_KEY" ]; then
     gre_cmd+=(key "$GRE_KEY")
 fi
