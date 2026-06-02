@@ -36,6 +36,9 @@ normalize_config() {
     FORTI_TUNNEL_IP=${FORTI_TUNNEL_IP:-${TUNNEL_1_FORTI_IP:-}}
     GRE_IF=${GRE_IF:-${TUNNEL_1_GRE_IF:-gre-forti}}
     GRE_KEY=${GRE_KEY:-}
+    GRE_MTU=${GRE_MTU:-1476}
+    MSS_MODE=${MSS_MODE:-clamp}
+    MSS_VALUE=${MSS_VALUE:-}
     ENABLE_HARDENING=${ENABLE_HARDENING:-no}
 }
 
@@ -52,6 +55,12 @@ elif ! ip link show "$GRE_IF" &>/dev/null; then
 elif ! ip link show dev "$GRE_IF" 2>/dev/null | grep -q "<[^>]*UP"; then
     set_status "CRITICAL"
     ISSUES+=("Tunnel interface $GRE_IF is not UP")
+fi
+
+CURRENT_MTU=$(ip link show dev "$GRE_IF" 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i == "mtu") print $(i+1)}')
+if [ -n "$CURRENT_MTU" ] && [ "$CURRENT_MTU" != "$GRE_MTU" ]; then
+    set_status "WARNING"
+    ISSUES+=("Tunnel interface $GRE_IF MTU is $CURRENT_MTU, expected $GRE_MTU")
 fi
 
 # Check routes
@@ -92,6 +101,18 @@ if [[ "$ENABLE_HARDENING" =~ ^(yes|y|Y)$ ]]; then
     if [ "$(iptables -S FORWARD 2>/dev/null | awk '/^-P FORWARD/ {print $3}')" != "DROP" ]; then
         set_status "WARNING"
         ISSUES+=("Hardening is enabled but FORWARD policy is not DROP")
+    fi
+fi
+
+if [ "$MSS_MODE" = "fixed" ]; then
+    if ! iptables -t mangle -S GREX-MANGLE 2>/dev/null | grep -q -- "--set-mss $MSS_VALUE"; then
+        set_status "WARNING"
+        ISSUES+=("MSS_MODE=fixed but GREX-MANGLE does not set MSS to $MSS_VALUE")
+    fi
+elif [ "$MSS_MODE" = "clamp" ]; then
+    if ! iptables -t mangle -S GREX-MANGLE 2>/dev/null | grep -q -- "--clamp-mss-to-pmtu"; then
+        set_status "WARNING"
+        ISSUES+=("MSS_MODE=clamp but GREX-MANGLE does not clamp MSS to PMTU")
     fi
 fi
 

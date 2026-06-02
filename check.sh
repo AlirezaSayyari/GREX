@@ -23,6 +23,9 @@ normalize_config() {
     VPS_TUNNEL_IP=${VPS_TUNNEL_IP:-${TUNNEL_1_VPS_IP:-}}
     FORTI_TUNNEL_IP=${FORTI_TUNNEL_IP:-${TUNNEL_1_FORTI_IP:-}}
     GRE_IF=${GRE_IF:-${TUNNEL_1_GRE_IF:-gre-forti}}
+    GRE_MTU=${GRE_MTU:-1476}
+    MSS_MODE=${MSS_MODE:-clamp}
+    MSS_VALUE=${MSS_VALUE:-}
 }
 
 normalize_config
@@ -30,6 +33,7 @@ normalize_config
 # Check tunnel interface
 echo "1. Tunnel Interface:"
 ip -br a | grep "$GRE_IF" || echo "Tunnel interface $GRE_IF not found!"
+echo "Expected MTU: $GRE_MTU"
 
 # Check routes
 echo
@@ -57,6 +61,7 @@ echo "INPUT policy: $(iptables -S INPUT 2>/dev/null | awk '/^-P INPUT/ {print $3
 echo "FORWARD policy: $(iptables -S FORWARD 2>/dev/null | awk '/^-P FORWARD/ {print $3}')"
 iptables -L GREX-INPUT -n -v 2>/dev/null || echo "GREX-INPUT chain not found"
 iptables -t mangle -L GREX-MANGLE -n -v 2>/dev/null || echo "GREX-MANGLE chain not found"
+echo "MSS mode: $MSS_MODE ${MSS_VALUE:-}"
 
 # Check DNS
 echo

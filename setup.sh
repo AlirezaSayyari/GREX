@@ -215,6 +215,13 @@ prompt VPS_TUNNEL_IP "VPS tunnel IP with mask" "10.10.10.2/30"
 prompt FORTI_TUNNEL_IP "FortiGate tunnel IP" "10.10.10.1"
 prompt GRE_IF "GRE interface" "gre-forti"
 prompt GRE_KEY "GRE key (blank for no key)" ""
+prompt GRE_MTU "GRE interface MTU" "1400"
+prompt MSS_MODE "TCP MSS mode (fixed/clamp/off)" "fixed"
+if [ "$MSS_MODE" = "fixed" ]; then
+    prompt MSS_VALUE "TCP MSS value" "1360"
+else
+    MSS_VALUE=""
+fi
 prompt ENABLE_HARDENING "Enable VPS firewall hardening? (yes/no)" "yes"
 if [[ "$ENABLE_HARDENING" =~ ^(yes|y|Y)$ ]]; then
     prompt ADMIN_IP "Admin SSH source IP or CIDR" "${DETECTED_ADMIN_IP:-x.x.x.x}"
@@ -236,6 +243,9 @@ VPS_TUNNEL_IP=$VPS_TUNNEL_IP
 FORTI_TUNNEL_IP=$FORTI_TUNNEL_IP
 GRE_IF=$GRE_IF
 GRE_KEY=$GRE_KEY
+GRE_MTU=$GRE_MTU
+MSS_MODE=$MSS_MODE
+MSS_VALUE=$MSS_VALUE
 ENABLE_HARDENING=$ENABLE_HARDENING
 ADMIN_IP=$ADMIN_IP
 ALLOW_ICMP=$ALLOW_ICMP

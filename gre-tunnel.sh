@@ -49,6 +49,9 @@ normalize_config() {
     FORTI_TUNNEL_IP=${FORTI_TUNNEL_IP:-${TUNNEL_1_FORTI_IP:-}}
     GRE_IF=${GRE_IF:-${TUNNEL_1_GRE_IF:-gre-forti}}
     GRE_KEY=${GRE_KEY:-}
+    GRE_MTU=${GRE_MTU:-1476}
+    MSS_MODE=${MSS_MODE:-clamp}
+    MSS_VALUE=${MSS_VALUE:-}
     ENABLE_HARDENING=${ENABLE_HARDENING:-no}
     ADMIN_IP=${ADMIN_IP:-}
     ALLOW_ICMP=${ALLOW_ICMP:-yes}
@@ -130,6 +133,29 @@ validate_config() {
     require_config_value "VPS_TUNNEL_IP"
     require_config_value "FORTI_TUNNEL_IP"
     require_config_value "GRE_IF"
+    require_config_value "GRE_MTU"
+
+    if ! [[ "$GRE_MTU" =~ ^[0-9]+$ ]]; then
+        echo "GRE_MTU must be a number." >&2
+        exit 1
+    fi
+
+    case "$MSS_MODE" in
+        clamp|fixed|off)
+            ;;
+        *)
+            echo "MSS_MODE must be clamp, fixed, or off." >&2
+            exit 1
+            ;;
+    esac
+
+    if [ "$MSS_MODE" = "fixed" ]; then
+        require_config_value "MSS_VALUE"
+        if ! [[ "$MSS_VALUE" =~ ^[0-9]+$ ]]; then
+            echo "MSS_VALUE must be a number when MSS_MODE=fixed." >&2
+            exit 1
+        fi
+    fi
 
     if [[ "$ENABLE_HARDENING" =~ ^(yes|y|Y)$ ]]; then
         require_config_value "ADMIN_IP"
@@ -163,9 +189,19 @@ setup_mss_chain() {
     iptables -t mangle -F "$GREX_MANGLE_CHAIN"
 
     delete_rule_if_exists mangle FORWARD -j "$GREX_MANGLE_CHAIN"
+
+    if [ "$MSS_MODE" = "off" ]; then
+        return 0
+    fi
+
     iptables -t mangle -I FORWARD 1 -j "$GREX_MANGLE_CHAIN"
-    iptables -t mangle -A "$GREX_MANGLE_CHAIN" -i "$GRE_IF" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
-    iptables -t mangle -A "$GREX_MANGLE_CHAIN" -o "$GRE_IF" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+    if [ "$MSS_MODE" = "fixed" ]; then
+        iptables -t mangle -A "$GREX_MANGLE_CHAIN" -i "$GRE_IF" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss "$MSS_VALUE"
+        iptables -t mangle -A "$GREX_MANGLE_CHAIN" -o "$GRE_IF" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss "$MSS_VALUE"
+    else
+        iptables -t mangle -A "$GREX_MANGLE_CHAIN" -i "$GRE_IF" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+        iptables -t mangle -A "$GREX_MANGLE_CHAIN" -o "$GRE_IF" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+    fi
 }
 
 append_rule_if_missing() {
@@ -212,6 +248,13 @@ setup_input_hardening() {
         iptables -P FORWARD DROP
         iptables -P OUTPUT ACCEPT
     else
+        delete_rule_if_exists filter INPUT -j "$GREX_INPUT_CHAIN"
+        iptables -F "$GREX_INPUT_CHAIN" 2>/dev/null || true
+        iptables -X "$GREX_INPUT_CHAIN" 2>/dev/null || true
+        iptables -P INPUT ACCEPT
+        iptables -P FORWARD ACCEPT
+        iptables -P OUTPUT ACCEPT
+
         delete_rule_if_exists filter INPUT -p 47 -s "$FORTI_PUBLIC_IP" -j ACCEPT
         insert_rule_if_missing filter INPUT 1 -p 47 -s "$FORTI_PUBLIC_IP" -j ACCEPT
     fi
@@ -239,7 +282,7 @@ fi
 "${gre_cmd[@]}"
 
 ip addr add "$VPS_TUNNEL_IP" dev "$GRE_IF"
-ip link set "$GRE_IF" mtu 1476
+ip link set "$GRE_IF" mtu "$GRE_MTU"
 ip link set "$GRE_IF" up
 
 # Add routes for internal subnets

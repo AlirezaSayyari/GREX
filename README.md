@@ -110,6 +110,7 @@ The wizard configures:
 - upstream DNS servers
 - Ethernet egress interface
 - tunnel IPs and GRE interface name
+- GRE MTU and TCP MSS handling
 - optional VPS firewall hardening
 - admin SSH source IP or CIDR when hardening is enabled
 
@@ -245,7 +246,7 @@ sudo sysctl -p
 sudo ip link del gre-forti 2>/dev/null
 sudo ip link add gre-forti type gre local <VPS_PUBLIC_IP> remote <FORTI_PUBLIC_IP> ttl 255
 sudo ip addr add 10.10.10.2/30 dev gre-forti
-sudo ip link set gre-forti mtu 1476
+sudo ip link set gre-forti mtu 1400
 sudo ip link set gre-forti up
 ```
 
@@ -272,9 +273,12 @@ sudo iptables -A GREX-FORWARD -i gre-forti -o eth0 -j ACCEPT
 sudo iptables -A GREX-FORWARD -i eth0 -o gre-forti -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 sudo iptables -t mangle -N GREX-MANGLE 2>/dev/null || true
 sudo iptables -t mangle -I FORWARD 1 -j GREX-MANGLE
-sudo iptables -t mangle -A GREX-MANGLE -i gre-forti -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
-sudo iptables -t mangle -A GREX-MANGLE -o gre-forti -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+sudo iptables -t mangle -A GREX-MANGLE -i gre-forti -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1360
+sudo iptables -t mangle -A GREX-MANGLE -o gre-forti -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1360
 ```
+
+Use `--clamp-mss-to-pmtu` instead of `--set-mss 1360` if PMTU discovery is
+reliable on your path. The wizard exposes this as `MSS_MODE`.
 
 ### 6. Harden VPS input and default forwarding
 
