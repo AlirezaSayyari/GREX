@@ -52,36 +52,37 @@ For Ubuntu / Debian:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y curl iproute2 iptables dnsmasq fail2ban
+sudo apt-get install -y curl iproute2 iptables conntrack dnsmasq fail2ban
 ```
 
 For Rocky Linux / AlmaLinux / CentOS / RHEL / Fedora:
 
 ```bash
-sudo dnf install -y curl iproute iptables iptables-services dnsmasq fail2ban
+sudo dnf install -y curl iproute iptables iptables-services conntrack-tools dnsmasq fail2ban
 # or on older systems:
-sudo yum install -y curl iproute iptables iptables-services dnsmasq fail2ban
+sudo yum install -y curl iproute iptables iptables-services conntrack-tools dnsmasq fail2ban
 ```
 
 For openSUSE / SLES:
 
 ```bash
-sudo zypper --non-interactive install curl iproute2 iptables dnsmasq fail2ban
+sudo zypper --non-interactive install curl iproute2 iptables conntrack-tools dnsmasq fail2ban
 ```
 
 For Arch Linux:
 
 ```bash
-sudo pacman -Sy --noconfirm --needed curl iproute2 iptables dnsmasq fail2ban
+sudo pacman -Sy --noconfirm --needed curl iproute2 iptables conntrack-tools dnsmasq fail2ban
 ```
 
 For Alpine Linux:
 
 ```bash
-sudo apk add --no-cache bash curl iproute2 iptables dnsmasq fail2ban
+sudo apk add --no-cache bash curl iproute2 iptables conntrack-tools dnsmasq fail2ban
 ```
 
-`curl` is required for external IP validation and diagnostic testing.
+`curl` is required for external IP validation and diagnostic testing. `tar` is
+also required by the one-line bootstrap installer.
 
 ### 3. Alternative manual install
 
@@ -113,7 +114,9 @@ The wizard configures:
 - GRE MTU and TCP MSS handling
 - optional VPS firewall hardening
 - admin SSH source IPs/CIDRs when hardening is enabled
+- optional egress filtering and rate-limited firewall drop logging
 - kernel/network sysctl hardening profile
+- conntrack capacity warning and critical thresholds
 - optional fail2ban SSH protection
 
 The VPS public IP is auto-detected during setup and shown as the default value.
