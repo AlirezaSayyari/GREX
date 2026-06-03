@@ -172,6 +172,8 @@ version_gt() {
 fetch_latest_version() {
     local api_url
     local response
+    local latest_release
+    local latest_tag
     local latest
 
     if ! command -v curl >/dev/null 2>&1; then
@@ -180,12 +182,15 @@ fetch_latest_version() {
 
     api_url="https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest"
     response=$(curl -fsSL --connect-timeout 3 --max-time 8 "$api_url" 2>/dev/null || true)
-    latest=$(printf "%s" "$response" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
+    latest_release=$(printf "%s" "$response" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
 
-    if [ -z "$latest" ]; then
-        api_url="https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/tags"
-        response=$(curl -fsSL --connect-timeout 3 --max-time 8 "$api_url" 2>/dev/null || true)
-        latest=$(printf "%s" "$response" | sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
+    api_url="https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/tags"
+    response=$(curl -fsSL --connect-timeout 3 --max-time 8 "$api_url" 2>/dev/null || true)
+    latest_tag=$(printf "%s" "$response" | sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
+
+    latest=$latest_release
+    if [ -z "$latest" ] || { [ -n "$latest_tag" ] && version_gt "$latest_tag" "$latest"; }; then
+        latest=$latest_tag
     fi
 
     [ -n "$latest" ] || return 1
