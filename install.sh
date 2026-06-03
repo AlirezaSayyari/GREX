@@ -56,8 +56,9 @@ run_as_root chmod +x "$INSTALL_DIR/bootstrap.sh" 2>/dev/null || true
 run_as_root bash -c "printf '%s\n' '#!/bin/bash' 'exec /srv/GREX/manage.sh \"\$@\"' > '$BIN_DIR/grex'"
 run_as_root chmod +x "$BIN_DIR/grex"
 
-if [ ! -e /usr/bin/grex ] && [ -d /usr/bin ]; then
-    run_as_root ln -s "$BIN_DIR/grex" /usr/bin/grex
+if [ -d /usr/bin ]; then
+    run_as_root bash -c "printf '%s\n' '#!/bin/bash' 'exec /srv/GREX/manage.sh \"\$@\"' > /usr/bin/grex"
+    run_as_root chmod +x /usr/bin/grex
 fi
 
 if [ -f "$CONFIG_FILE" ]; then
