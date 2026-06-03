@@ -926,6 +926,39 @@ sample_interface_rate() {
         "$(read_counter "$iface" tx_errors)"
 }
 
+print_interface_rate_line() {
+    local iface=$1
+    local seconds=$2
+    local rx1=$3
+    local tx1=$4
+    local drop_rx1=$5
+    local drop_tx1=$6
+    local err_rx1=$7
+    local err_tx1=$8
+    local rx2 tx2 drop_rx2 drop_tx2 err_rx2 err_tx2 rx_rate tx_rate
+
+    if [ -z "$iface" ] || [ ! -d "/sys/class/net/$iface" ]; then
+        printf "%-10s not found\n" "$iface"
+        return 0
+    fi
+
+    rx2=$(read_counter "$iface" rx_bytes)
+    tx2=$(read_counter "$iface" tx_bytes)
+    drop_rx2=$(read_counter "$iface" rx_dropped)
+    drop_tx2=$(read_counter "$iface" tx_dropped)
+    err_rx2=$(read_counter "$iface" rx_errors)
+    err_tx2=$(read_counter "$iface" tx_errors)
+    rx_rate=$(( (rx2 - rx1) * 8 / seconds ))
+    tx_rate=$(( (tx2 - tx1) * 8 / seconds ))
+
+    printf "%-10s RX %8.2f Mbit/s  TX %8.2f Mbit/s  drops +%s/+%s total %s/%s  errors +%s/+%s total %s/%s\n" \
+        "$iface" \
+        "$(awk "BEGIN {print $rx_rate/1000000}")" \
+        "$(awk "BEGIN {print $tx_rate/1000000}")" \
+        "$((drop_rx2 - drop_rx1))" "$((drop_tx2 - drop_tx1))" "$drop_rx2" "$drop_tx2" \
+        "$((err_rx2 - err_rx1))" "$((err_tx2 - err_tx1))" "$err_rx2" "$err_tx2"
+}
+
 recommended_mss_for_mtu() {
     local mtu=$1
 
@@ -967,25 +1000,51 @@ print_conntrack_summary() {
     fi
 }
 
+conntrack_table_file() {
+    if [ -r /proc/net/nf_conntrack ]; then
+        printf "/proc/net/nf_conntrack"
+    elif [ -r /proc/net/ip_conntrack ]; then
+        printf "/proc/net/ip_conntrack"
+    fi
+}
+
 live_server_monitor() {
     local loops=${1:-0}
     local iteration=0
+    local sample_seconds=2
+    local eth_rx eth_tx eth_drop_rx eth_drop_tx eth_err_rx eth_err_tx
+    local gre_rx gre_tx gre_drop_rx gre_drop_tx gre_err_rx gre_err_tx
 
     load_config || {
         read -p "Press Enter to continue..." _
         return 1
     }
 
-    echo "Live monitor refreshes every few seconds. Press Ctrl+C to stop."
-    sleep 1
+    tput clear 2>/dev/null || clear
 
     while true; do
         iteration=$((iteration + 1))
-        clear
+        eth_rx=$(read_counter "$ETH_INTERFACE" rx_bytes)
+        eth_tx=$(read_counter "$ETH_INTERFACE" tx_bytes)
+        eth_drop_rx=$(read_counter "$ETH_INTERFACE" rx_dropped)
+        eth_drop_tx=$(read_counter "$ETH_INTERFACE" tx_dropped)
+        eth_err_rx=$(read_counter "$ETH_INTERFACE" rx_errors)
+        eth_err_tx=$(read_counter "$ETH_INTERFACE" tx_errors)
+        gre_rx=$(read_counter "$GRE_IF" rx_bytes)
+        gre_tx=$(read_counter "$GRE_IF" tx_bytes)
+        gre_drop_rx=$(read_counter "$GRE_IF" rx_dropped)
+        gre_drop_tx=$(read_counter "$GRE_IF" tx_dropped)
+        gre_err_rx=$(read_counter "$GRE_IF" rx_errors)
+        gre_err_tx=$(read_counter "$GRE_IF" tx_errors)
+        sleep "$sample_seconds"
+
+        tput cup 0 0 2>/dev/null || clear
+        tput ed 2>/dev/null || true
         echo "========================================"
         echo "          GREX Live Monitor             "
         echo "========================================"
         date
+        echo "Refresh: $iteration  Interval: ${sample_seconds}s  Exit: Ctrl+C"
         echo
         echo "Load: $(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null || echo unknown)"
         if command -v free >/dev/null 2>&1; then
@@ -1003,8 +1062,8 @@ live_server_monitor() {
         print_conntrack_summary
         echo
         echo "Network rates:"
-        sample_interface_rate "$ETH_INTERFACE" 1
-        sample_interface_rate "$GRE_IF" 1
+        print_interface_rate_line "$ETH_INTERFACE" "$sample_seconds" "$eth_rx" "$eth_tx" "$eth_drop_rx" "$eth_drop_tx" "$eth_err_rx" "$eth_err_tx"
+        print_interface_rate_line "$GRE_IF" "$sample_seconds" "$gre_rx" "$gre_tx" "$gre_drop_rx" "$gre_drop_tx" "$gre_err_rx" "$gre_err_tx"
         echo
         echo "Tunnel reachability:"
         if ping -c 1 -W 1 "$REMOTE_TUNNEL_IP" >/dev/null 2>&1; then
@@ -1016,7 +1075,6 @@ live_server_monitor() {
         if [ "$loops" -gt 0 ] && [ "$iteration" -ge "$loops" ]; then
             break
         fi
-        sleep 2
     done
 }
 
@@ -1042,6 +1100,8 @@ firewall_counters() {
 }
 
 conntrack_monitor() {
+    local table_file
+
     load_config || return 1
 
     print_conntrack_summary
@@ -1049,7 +1109,30 @@ conntrack_monitor() {
         echo
         run_as_root conntrack -S 2>/dev/null || true
     else
-        echo "conntrack command not installed; install conntrack-tools for protocol counters."
+        table_file=$(conntrack_table_file)
+        if [ -n "$table_file" ]; then
+            echo
+            echo "conntrack command not installed; showing basic counters from $table_file"
+            awk '
+                {
+                    proto[$3] += 1
+                    for (i = 1; i <= NF; i++) {
+                        if ($i ~ /^(ESTABLISHED|SYN_SENT|SYN_RECV|TIME_WAIT|CLOSE|CLOSE_WAIT|LAST_ACK|FIN_WAIT)$/) {
+                            state[$i] += 1
+                        }
+                    }
+                }
+                END {
+                    print "Protocols:"
+                    for (p in proto) printf "  %s %d\n", p, proto[p]
+                    print "States:"
+                    for (s in state) printf "  %s %d\n", s, state[s]
+                }
+            ' "$table_file"
+        else
+            echo "conntrack command not installed and proc conntrack table is unavailable."
+            echo "Install conntrack-tools for protocol counters."
+        fi
     fi
 }
 
@@ -1091,15 +1174,11 @@ mtu_mss_advisor() {
 
 bandwidth_by_source() {
     local seconds
-    local tmp_file
+    local loops
+    local iteration=0
+    local tcpdump_filter
 
     load_config || return 1
-
-    if ! command -v tcpdump >/dev/null 2>&1; then
-        echo "tcpdump is required for bandwidth-by-source sampling."
-        echo "Install tcpdump, then retry."
-        return 1
-    fi
 
     read -r -p "Sample duration in seconds [5]: " seconds
     seconds=${seconds:-5}
@@ -1108,44 +1187,150 @@ bandwidth_by_source() {
         return 1
     fi
 
+    read -r -p "Refresh count (0 for until Ctrl+C) [10]: " loops
+    loops=${loops:-10}
+    if ! [[ "$loops" =~ ^[0-9]+$ ]] || [ "$loops" -gt 1000 ]; then
+        echo "Refresh count must be a number between 0 and 1000."
+        return 1
+    fi
+
+    tcpdump_filter=$(internal_source_filter)
+    if [ -z "$tcpdump_filter" ]; then
+        echo "Could not build tcpdump filter from INTERNAL_SUBNETS."
+        return 1
+    fi
+
+    tput clear 2>/dev/null || clear
+
+    while true; do
+        iteration=$((iteration + 1))
+        bandwidth_by_source_sample "$seconds" "$tcpdump_filter" "$iteration"
+        if [ "$loops" -gt 0 ] && [ "$iteration" -ge "$loops" ]; then
+            break
+        fi
+    done
+}
+
+internal_source_filter() {
+    local subnet
+    local filter=""
+
+    IFS=',' read -ra SUBNETS <<< "$INTERNAL_SUBNETS"
+    for subnet in "${SUBNETS[@]}"; do
+        subnet=$(trim "$subnet")
+        [ -n "$subnet" ] || continue
+        if [ -n "$filter" ]; then
+            filter="$filter or "
+        fi
+        filter="${filter}src net $subnet"
+    done
+
+    printf "%s" "$filter"
+}
+
+bandwidth_bar() {
+    local value=$1
+    local max=$2
+    local width=${3:-24}
+    local filled=0
+    local i
+
+    if [ "$max" -gt 0 ]; then
+        filled=$((value * width / max))
+    fi
+    [ "$filled" -gt "$width" ] && filled=$width
+    for ((i = 0; i < width; i++)); do
+        if [ "$i" -lt "$filled" ]; then
+            printf "#"
+        else
+            printf "."
+        fi
+    done
+}
+
+bandwidth_by_source_sample() {
+    local seconds=$1
+    local tcpdump_filter=$2
+    local iteration=$3
+    local tmp_file
+    local data_file
+    local max_bytes
+    local max_bps
+
+    if ! command -v tcpdump >/dev/null 2>&1; then
+        echo "tcpdump is required for bandwidth-by-source sampling."
+        echo "Install tcpdump, then retry."
+        return 1
+    fi
+
     tmp_file=$(mktemp)
-    echo "Sampling $GRE_IF for $seconds seconds..."
     set +e
     if command -v timeout >/dev/null 2>&1; then
-        run_as_root timeout "$seconds" tcpdump -ni "$GRE_IF" -q ip > "$tmp_file" 2>/dev/null
+        run_as_root timeout "$seconds" tcpdump -ni "$GRE_IF" -q "ip and ($tcpdump_filter)" > "$tmp_file" 2>/dev/null
     else
-        run_as_root tcpdump -ni "$GRE_IF" -q -c 500 ip > "$tmp_file" 2>/dev/null
+        run_as_root tcpdump -ni "$GRE_IF" -q -c 500 "ip and ($tcpdump_filter)" > "$tmp_file" 2>/dev/null
     fi
     set -e
 
+    tput cup 0 0 2>/dev/null || clear
+    tput ed 2>/dev/null || true
+    echo "========================================"
+    echo "       GREX Bandwidth by Source         "
+    echo "========================================"
+    date
+    echo "Interface: $GRE_IF  Interval: ${seconds}s  Refresh: $iteration  Filter: internal sources only"
     echo
-    echo "Top source IPs observed on $GRE_IF:"
+
     if [ ! -s "$tmp_file" ]; then
         echo "No IP packets observed during the sample window."
         rm -f "$tmp_file"
         return 0
     fi
 
+    data_file=$(mktemp)
     awk '
         / IP / {
             for (i = 1; i <= NF; i++) {
                 if ($i == "IP") {
                     src = $(i + 1)
+                    dst = $(i + 3)
                     sub(/\.[0-9]+$/, "", src)
+                    sub(/:$/, "", dst)
+                    sub(/\.[0-9]+$/, "", dst)
                 }
                 if ($i == "length") {
                     bytes[src] += $(i + 1)
                     packets[src] += 1
+                    sessions[src SUBSEP dst] = 1
                 }
             }
         }
         END {
+            for (key in sessions) {
+                split(key, parts, SUBSEP)
+                session_count[parts[1]] += 1
+            }
             for (src in packets) {
-                printf "%s %d packets %d bytes\n", src, packets[src], bytes[src]
+                printf "%s %d %d %d\n", src, bytes[src], session_count[src], packets[src]
             }
         }
-    ' "$tmp_file" | sort -k4,4nr | head -20
-    rm -f "$tmp_file"
+    ' "$tmp_file" | sort -k2,2nr | head -20 > "$data_file"
+
+    max_bytes=$(awk 'NR == 1 {print $2}' "$data_file")
+    max_bytes=${max_bytes:-0}
+    max_bps=$((max_bytes * 8 / seconds))
+
+    printf "%-18s %14s  %-24s %10s  %-12s %14s  %-24s\n" "Source" "Bytes" "Bytes bar" "Sessions" "Packets" "Bandwidth" "Bandwidth bar"
+    printf "%-18s %14s  %-24s %10s  %-12s %14s  %-24s\n" "------" "-----" "---------" "--------" "-------" "---------" "-------------"
+    while read -r src bytes sessions packets; do
+        bps=$((bytes * 8 / seconds))
+        mbps=$(awk "BEGIN {printf \"%.2f\", $bps/1000000}")
+        mib=$(awk "BEGIN {printf \"%.2f MB\", $bytes/1048576}")
+        bytes_bar=$(bandwidth_bar "$bytes" "$max_bytes" 24)
+        bps_bar=$(bandwidth_bar "$bps" "$max_bps" 24)
+        printf "%-18s %14s  %-24s %10s  %-12s %11s Mbps  %-24s\n" "$src" "$mib" "$bytes_bar" "$sessions" "$packets" "$mbps" "$bps_bar"
+    done < "$data_file"
+    rm -f "$tmp_file" "$data_file"
 }
 
 diagnostics_menu() {
