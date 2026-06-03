@@ -74,7 +74,7 @@ stop_dnsmasq_if_running() {
 }
 
 usage() {
-    echo "Usage: $0 {help|version|check-upgrade|upgrade|backup|restore|configure|edit|activate|deactivate|enable|disable|start|stop|status|logs|health|check}"
+    echo "Usage: $0 {help|version|check-upgrade|upgrade|backup|restore|configure|edit|diagnostics|monitor|bandwidth|mtu-advisor|activate|deactivate|enable|disable|start|stop|status|logs|health|check}"
     exit "${1:-1}"
 }
 
@@ -881,6 +881,308 @@ edit_config_menu() {
     done
 }
 
+read_counter() {
+    local iface=$1
+    local counter=$2
+    local path="/sys/class/net/$iface/statistics/$counter"
+
+    if [ -r "$path" ]; then
+        cat "$path"
+    else
+        printf "0"
+    fi
+}
+
+sample_interface_rate() {
+    local iface=$1
+    local seconds=${2:-1}
+    local rx1 tx1 rx2 tx2 rx_rate tx_rate
+
+    if [ -z "$iface" ] || [ ! -d "/sys/class/net/$iface" ]; then
+        echo "$iface: not found"
+        return 0
+    fi
+
+    rx1=$(read_counter "$iface" rx_bytes)
+    tx1=$(read_counter "$iface" tx_bytes)
+    sleep "$seconds"
+    rx2=$(read_counter "$iface" rx_bytes)
+    tx2=$(read_counter "$iface" tx_bytes)
+    rx_rate=$(( (rx2 - rx1) * 8 / seconds ))
+    tx_rate=$(( (tx2 - tx1) * 8 / seconds ))
+
+    printf "%s: RX %.2f Mbit/s, TX %.2f Mbit/s, drops RX/TX %s/%s, errors RX/TX %s/%s\n" \
+        "$iface" \
+        "$(awk "BEGIN {print $rx_rate/1000000}")" \
+        "$(awk "BEGIN {print $tx_rate/1000000}")" \
+        "$(read_counter "$iface" rx_dropped)" \
+        "$(read_counter "$iface" tx_dropped)" \
+        "$(read_counter "$iface" rx_errors)" \
+        "$(read_counter "$iface" tx_errors)"
+}
+
+recommended_mss_for_mtu() {
+    local mtu=$1
+
+    if [[ "$mtu" =~ ^[0-9]+$ ]] && [ "$mtu" -gt 40 ]; then
+        printf "%s" "$((mtu - 40))"
+    fi
+}
+
+icmp_payload_for_mtu() {
+    local mtu=$1
+
+    if [[ "$mtu" =~ ^[0-9]+$ ]] && [ "$mtu" -gt 28 ]; then
+        printf "%s" "$((mtu - 28))"
+    fi
+}
+
+service_state() {
+    local service=$1
+
+    if has_systemd; then
+        systemctl is-active "$service" 2>/dev/null || printf "unknown"
+    else
+        printf "systemd unavailable"
+    fi
+}
+
+print_conntrack_summary() {
+    local count
+    local max
+    local percent
+
+    count=$(sysctl -q -n net.netfilter.nf_conntrack_count 2>/dev/null || true)
+    max=$(sysctl -q -n net.netfilter.nf_conntrack_max 2>/dev/null || true)
+    if [ -n "$count" ] && [ -n "$max" ] && [ "$max" -gt 0 ]; then
+        percent=$((count * 100 / max))
+        echo "Conntrack: $count/$max (${percent}%)"
+    else
+        echo "Conntrack: counters unavailable"
+    fi
+}
+
+live_server_monitor() {
+    local loops=${1:-0}
+    local iteration=0
+
+    load_config || {
+        read -p "Press Enter to continue..." _
+        return 1
+    }
+
+    echo "Live monitor refreshes every few seconds. Press Ctrl+C to stop."
+    sleep 1
+
+    while true; do
+        iteration=$((iteration + 1))
+        clear
+        echo "========================================"
+        echo "          GREX Live Monitor             "
+        echo "========================================"
+        date
+        echo
+        echo "Load: $(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null || echo unknown)"
+        if command -v free >/dev/null 2>&1; then
+            free -h | awk 'NR==1 || NR==2 || NR==3 {print}'
+        fi
+        if command -v df >/dev/null 2>&1; then
+            df -h / | awk 'NR==1 || NR==2 {print}'
+        fi
+        echo
+        echo "Services:"
+        echo "gre-tunnel: $(service_state gre-tunnel)"
+        echo "dnsmasq:    $(service_state dnsmasq)"
+        echo "fail2ban:   $(service_state fail2ban)"
+        echo
+        print_conntrack_summary
+        echo
+        echo "Network rates:"
+        sample_interface_rate "$ETH_INTERFACE" 1
+        sample_interface_rate "$GRE_IF" 1
+        echo
+        echo "Tunnel reachability:"
+        if ping -c 1 -W 1 "$REMOTE_TUNNEL_IP" >/dev/null 2>&1; then
+            echo "$REMOTE_TUNNEL_IP reachable"
+        else
+            echo "$REMOTE_TUNNEL_IP not reachable"
+        fi
+
+        if [ "$loops" -gt 0 ] && [ "$iteration" -ge "$loops" ]; then
+            break
+        fi
+        sleep 2
+    done
+}
+
+firewall_counters() {
+    load_config || return 1
+
+    echo "=== GREX firewall counters ==="
+    echo
+    echo "FORWARD:"
+    run_as_root iptables -L FORWARD -n -v 2>/dev/null | head -30 || true
+    echo
+    echo "GREX-FORWARD:"
+    run_as_root iptables -L GREX-FORWARD -n -v 2>/dev/null || echo "GREX-FORWARD chain not found"
+    echo
+    echo "GREX-EGRESS:"
+    run_as_root iptables -L GREX-EGRESS -n -v 2>/dev/null || echo "GREX-EGRESS chain not found"
+    echo
+    echo "GREX-INPUT:"
+    run_as_root iptables -L GREX-INPUT -n -v 2>/dev/null || echo "GREX-INPUT chain not found"
+    echo
+    echo "NAT POSTROUTING:"
+    run_as_root iptables -t nat -L POSTROUTING -n -v 2>/dev/null | grep -E 'MASQUERADE|Chain' || true
+}
+
+conntrack_monitor() {
+    load_config || return 1
+
+    print_conntrack_summary
+    if command -v conntrack >/dev/null 2>&1; then
+        echo
+        run_as_root conntrack -S 2>/dev/null || true
+    else
+        echo "conntrack command not installed; install conntrack-tools for protocol counters."
+    fi
+}
+
+mtu_mss_advisor() {
+    local current_mtu
+    local effective_mtu
+    local recommended_mss
+    local df_payload
+
+    load_config || return 1
+
+    current_mtu=$(ip link show dev "$GRE_IF" 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i == "mtu") print $(i+1)}')
+    effective_mtu=${current_mtu:-$GRE_MTU}
+    recommended_mss=$(recommended_mss_for_mtu "$effective_mtu")
+    df_payload=$(icmp_payload_for_mtu "$effective_mtu")
+
+    echo "=== MTU/MSS Advisor ==="
+    echo "GRE interface:       $GRE_IF"
+    echo "Configured GRE MTU:  $GRE_MTU"
+    echo "Current GRE MTU:     ${current_mtu:-unknown}"
+    echo "MSS mode:            $MSS_MODE"
+    echo "MSS value:           ${MSS_VALUE:-<blank>}"
+    echo "Recommended MSS:     ${recommended_mss:-unknown}"
+    echo "DF ping probe:       ping $REMOTE_TUNNEL_IP -M do -s ${df_payload:-unknown} -c 4"
+    echo
+
+    if [ "$MSS_MODE" = "fixed" ] && [[ "$MSS_VALUE" =~ ^[0-9]+$ ]] && [ -n "$recommended_mss" ] && [ "$MSS_VALUE" -gt "$recommended_mss" ]; then
+        echo "Verdict: possible MSS/MTU mismatch"
+        echo "Suggested: set MSS_VALUE to $recommended_mss or lower, then apply configuration."
+    elif [ "$MSS_MODE" = "off" ]; then
+        echo "Verdict: MSS handling is disabled"
+        echo "Suggested: use MSS_MODE=fixed with MSS_VALUE=${recommended_mss:-1360}, or MSS_MODE=clamp."
+    else
+        echo "Verdict: current MTU/MSS settings look consistent."
+    fi
+    echo
+    echo "Run the DF ping probe during low-risk hours. If it fails, lower GRE_MTU and MSS_VALUE together."
+}
+
+bandwidth_by_source() {
+    local seconds
+    local tmp_file
+
+    load_config || return 1
+
+    if ! command -v tcpdump >/dev/null 2>&1; then
+        echo "tcpdump is required for bandwidth-by-source sampling."
+        echo "Install tcpdump, then retry."
+        return 1
+    fi
+
+    read -r -p "Sample duration in seconds [5]: " seconds
+    seconds=${seconds:-5}
+    if ! [[ "$seconds" =~ ^[0-9]+$ ]] || [ "$seconds" -lt 1 ] || [ "$seconds" -gt 60 ]; then
+        echo "Duration must be between 1 and 60 seconds."
+        return 1
+    fi
+
+    tmp_file=$(mktemp)
+    echo "Sampling $GRE_IF for $seconds seconds..."
+    set +e
+    if command -v timeout >/dev/null 2>&1; then
+        run_as_root timeout "$seconds" tcpdump -ni "$GRE_IF" -q ip > "$tmp_file" 2>/dev/null
+    else
+        run_as_root tcpdump -ni "$GRE_IF" -q -c 500 ip > "$tmp_file" 2>/dev/null
+    fi
+    set -e
+
+    echo
+    echo "Top source IPs observed on $GRE_IF:"
+    if [ ! -s "$tmp_file" ]; then
+        echo "No IP packets observed during the sample window."
+        rm -f "$tmp_file"
+        return 0
+    fi
+
+    awk '
+        / IP / {
+            for (i = 1; i <= NF; i++) {
+                if ($i == "IP") {
+                    src = $(i + 1)
+                    sub(/\.[0-9]+$/, "", src)
+                }
+                if ($i == "length") {
+                    bytes[src] += $(i + 1)
+                    packets[src] += 1
+                }
+            }
+        }
+        END {
+            for (src in packets) {
+                printf "%s %d packets %d bytes\n", src, packets[src], bytes[src]
+            }
+        }
+    ' "$tmp_file" | sort -k4,4nr | head -20
+    rm -f "$tmp_file"
+}
+
+diagnostics_menu() {
+    while true; do
+        clear
+        echo "========================================"
+        echo "       GREX Diagnostics & Tuning        "
+        echo "========================================"
+        echo "1) Live Server Monitor"
+        echo "2) Bandwidth by Source"
+        echo "3) MTU/MSS Advisor"
+        echo "4) Conntrack Monitor"
+        echo "5) Firewall Counters"
+        echo "0) Back"
+        echo
+        read -r -p "Choose an option [0-5]: " diag_choice
+        case "$diag_choice" in
+            1) run_live_monitor_prompt ;;
+            2) bandwidth_by_source; read -p "Press Enter to continue..." _ ;;
+            3) mtu_mss_advisor; read -p "Press Enter to continue..." _ ;;
+            4) conntrack_monitor; read -p "Press Enter to continue..." _ ;;
+            5) firewall_counters; read -p "Press Enter to continue..." _ ;;
+            0) return 0 ;;
+            *) echo "Invalid selection."; read -p "Press Enter to continue..." _ ;;
+        esac
+    done
+}
+
+run_live_monitor_prompt() {
+    local loops
+
+    read -r -p "Refresh count (0 for until Ctrl+C) [10]: " loops
+    loops=${loops:-10}
+    if ! [[ "$loops" =~ ^[0-9]+$ ]] || [ "$loops" -gt 1000 ]; then
+        echo "Refresh count must be a number between 0 and 1000."
+        read -p "Press Enter to continue..." _
+        return 1
+    fi
+    live_server_monitor "$loops"
+    read -p "Press Enter to continue..." _
+}
+
 activate() {
     if [ ! -f "$CONFIG_FILE" ]; then
         echo "Configuration not found. Run 'sudo grex configure' first."
@@ -941,9 +1243,10 @@ menu() {
         echo "7) Logs"
         echo "8) Upgrade GREX"
         echo "9) Backup / Restore Config"
+        echo "10) Diagnostics & Tuning"
         echo "0) Exit"
         echo
-        read -p "Choose an option [0-9]: " choice
+        read -p "Choose an option [0-10]: " choice
         case "$choice" in
             1)
                 echo
@@ -1006,6 +1309,9 @@ menu() {
                 esac
                 read -p "Press Enter to continue..." _
                 ;;
+            10)
+                diagnostics_menu
+                ;;
             0)
                 exit 0
                 ;;
@@ -1041,6 +1347,24 @@ case $COMMAND in
         ;;
     restore)
         restore_latest_config_backup
+        ;;
+    diagnostics)
+        diagnostics_menu
+        ;;
+    monitor)
+        live_server_monitor
+        ;;
+    bandwidth)
+        bandwidth_by_source
+        ;;
+    mtu-advisor)
+        mtu_mss_advisor
+        ;;
+    conntrack)
+        conntrack_monitor
+        ;;
+    firewall-counters)
+        firewall_counters
         ;;
     configure)
         run_configure

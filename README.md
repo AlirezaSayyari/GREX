@@ -52,33 +52,33 @@ For Ubuntu / Debian:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y curl iproute2 iptables conntrack dnsmasq fail2ban
+sudo apt-get install -y curl iproute2 iptables conntrack tcpdump dnsmasq fail2ban
 ```
 
 For Rocky Linux / AlmaLinux / CentOS / RHEL / Fedora:
 
 ```bash
-sudo dnf install -y curl iproute iptables iptables-services conntrack-tools dnsmasq fail2ban
+sudo dnf install -y curl iproute iptables iptables-services conntrack-tools tcpdump dnsmasq fail2ban
 # or on older systems:
-sudo yum install -y curl iproute iptables iptables-services conntrack-tools dnsmasq fail2ban
+sudo yum install -y curl iproute iptables iptables-services conntrack-tools tcpdump dnsmasq fail2ban
 ```
 
 For openSUSE / SLES:
 
 ```bash
-sudo zypper --non-interactive install curl iproute2 iptables conntrack-tools dnsmasq fail2ban
+sudo zypper --non-interactive install curl iproute2 iptables conntrack-tools tcpdump dnsmasq fail2ban
 ```
 
 For Arch Linux:
 
 ```bash
-sudo pacman -Sy --noconfirm --needed curl iproute2 iptables conntrack-tools dnsmasq fail2ban
+sudo pacman -Sy --noconfirm --needed curl iproute2 iptables conntrack-tools tcpdump dnsmasq fail2ban
 ```
 
 For Alpine Linux:
 
 ```bash
-sudo apk add --no-cache bash curl iproute2 iptables conntrack-tools dnsmasq fail2ban
+sudo apk add --no-cache bash curl iproute2 iptables conntrack-tools tcpdump dnsmasq fail2ban
 ```
 
 `curl` is required for external IP validation and diagnostic testing. `tar` is
@@ -469,6 +469,7 @@ From the menu you can:
 - Logs
 - Upgrade GREX to the latest published version
 - Back up and restore the GREX config
+- Diagnostics & Tuning
 
 Command-line aliases still work too:
 
@@ -478,6 +479,10 @@ sudo grex edit
 sudo grex version
 sudo grex check-upgrade
 sudo grex upgrade
+sudo grex diagnostics
+sudo grex monitor
+sudo grex bandwidth
+sudo grex mtu-advisor
 sudo grex backup
 sudo grex restore
 sudo grex activate
@@ -507,6 +512,27 @@ a warning because mixed backends can make firewall inspection misleading.
 ---
 
 ## Monitoring and Diagnostics
+
+### Diagnostics and tuning menu
+
+GREX includes an interactive diagnostics menu:
+
+```bash
+sudo grex diagnostics
+```
+
+The menu provides:
+
+- live server monitor for load, memory, disk, service state, conntrack usage, interface rates, drops, and tunnel reachability
+- bandwidth-by-source sampling on the GRE interface using `tcpdump`
+- MTU/MSS advisor with recommended fixed MSS and DF ping probe
+- conntrack counters
+- GREX firewall and NAT counters
+
+These tools are observational by default. They do not change `GRE_MTU`,
+`MSS_MODE`, `MSS_VALUE`, firewall rules, or service state automatically.
+Bandwidth-by-source uses short packet sampling and can add CPU load on busy
+gateways; keep sample durations small during peak traffic.
 
 ### Traffic monitoring
 

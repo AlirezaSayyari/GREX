@@ -321,9 +321,9 @@ install_dependencies() {
     local packages
 
     if [[ "$ENABLE_DNSMASQ" =~ ^(yes|y|Y)$ ]]; then
-        packages=(curl iproute2 iptables conntrack dnsmasq)
+        packages=(curl iproute2 iptables conntrack tcpdump dnsmasq)
     else
-        packages=(curl iproute2 iptables conntrack)
+        packages=(curl iproute2 iptables conntrack tcpdump)
     fi
 
     if [[ "$ENABLE_FAIL2BAN" =~ ^(yes|y|Y)$ ]]; then
@@ -357,9 +357,9 @@ install_dependencies() {
         return "$status"
     elif command -v dnf >/dev/null 2>&1; then
         if [[ "$ENABLE_DNSMASQ" =~ ^(yes|y|Y)$ ]]; then
-            dnf install -y curl iproute iptables conntrack-tools dnsmasq
+            dnf install -y curl iproute iptables conntrack-tools tcpdump dnsmasq
         else
-            dnf install -y curl iproute iptables conntrack-tools
+            dnf install -y curl iproute iptables conntrack-tools tcpdump
         fi
         dnf install -y iptables-services 2>/dev/null || true
         if [[ "$ENABLE_FAIL2BAN" =~ ^(yes|y|Y)$ ]]; then
@@ -368,23 +368,23 @@ install_dependencies() {
         fi
     elif command -v yum >/dev/null 2>&1; then
         if [[ "$ENABLE_DNSMASQ" =~ ^(yes|y|Y)$ ]]; then
-            yum install -y curl iproute iptables iptables-services conntrack-tools dnsmasq
+            yum install -y curl iproute iptables iptables-services conntrack-tools tcpdump dnsmasq
         else
-            yum install -y curl iproute iptables iptables-services conntrack-tools
+            yum install -y curl iproute iptables iptables-services conntrack-tools tcpdump
         fi
         if [[ "$ENABLE_FAIL2BAN" =~ ^(yes|y|Y)$ ]]; then
             yum install -y epel-release 2>/dev/null || true
             yum install -y fail2ban
         fi
     elif command -v zypper >/dev/null 2>&1; then
-        zypper --non-interactive install curl iproute2 iptables conntrack-tools "${packages[@]:4}"
+        zypper --non-interactive install curl iproute2 iptables conntrack-tools tcpdump "${packages[@]:5}"
     elif command -v pacman >/dev/null 2>&1; then
-        pacman -Sy --noconfirm --needed curl iproute2 iptables conntrack-tools "${packages[@]:4}"
+        pacman -Sy --noconfirm --needed curl iproute2 iptables conntrack-tools tcpdump "${packages[@]:5}"
     elif command -v apk >/dev/null 2>&1; then
-        apk add --no-cache bash curl iproute2 iptables conntrack-tools "${packages[@]:4}"
+        apk add --no-cache bash curl iproute2 iptables conntrack-tools tcpdump "${packages[@]:5}"
     else
         echo "Unsupported Linux distribution: no known package manager was found."
-        echo "Install curl, iproute2/iproute, iptables, conntrack-tools, and optionally dnsmasq manually, then run 'sudo grex configure' again."
+        echo "Install curl, iproute2/iproute, iptables, conntrack-tools, tcpdump, and optionally dnsmasq manually, then run 'sudo grex configure' again."
         exit 1
     fi
 }
