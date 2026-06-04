@@ -1000,6 +1000,25 @@ print_conntrack_summary() {
     fi
 }
 
+wait_for_quit_key() {
+    local seconds=${1:-1}
+    local key
+    local elapsed=0
+
+    while [ "$elapsed" -lt "$seconds" ]; do
+        if read -rsn1 -t 1 key; then
+            case "$key" in
+                q|Q)
+                    return 0
+                    ;;
+            esac
+        fi
+        elapsed=$((elapsed + 1))
+    done
+
+    return 1
+}
+
 conntrack_table_file() {
     if [ -r /proc/net/nf_conntrack ]; then
         printf "/proc/net/nf_conntrack"
@@ -1014,6 +1033,7 @@ live_server_monitor() {
     local sample_seconds=2
     local eth_rx eth_tx eth_drop_rx eth_drop_tx eth_err_rx eth_err_tx
     local gre_rx gre_tx gre_drop_rx gre_drop_tx gre_err_rx gre_err_tx
+    local stop_requested=0
 
     load_config || {
         read -p "Press Enter to continue..." _
@@ -1036,7 +1056,9 @@ live_server_monitor() {
         gre_drop_tx=$(read_counter "$GRE_IF" tx_dropped)
         gre_err_rx=$(read_counter "$GRE_IF" rx_errors)
         gre_err_tx=$(read_counter "$GRE_IF" tx_errors)
-        sleep "$sample_seconds"
+        if wait_for_quit_key "$sample_seconds"; then
+            stop_requested=1
+        fi
 
         tput cup 0 0 2>/dev/null || clear
         tput ed 2>/dev/null || true
@@ -1044,7 +1066,7 @@ live_server_monitor() {
         echo "          GREX Live Monitor             "
         echo "========================================"
         date
-        echo "Refresh: $iteration  Interval: ${sample_seconds}s  Exit: Ctrl+C"
+        echo "Refresh: $iteration  Interval: ${sample_seconds}s  Press q to return"
         echo
         echo "Load: $(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null || echo unknown)"
         if command -v free >/dev/null 2>&1; then
@@ -1072,6 +1094,9 @@ live_server_monitor() {
             echo "$REMOTE_TUNNEL_IP not reachable"
         fi
 
+        if [ "$stop_requested" -eq 1 ]; then
+            break
+        fi
         if [ "$loops" -gt 0 ] && [ "$iteration" -ge "$loops" ]; then
             break
         fi
@@ -1204,7 +1229,12 @@ bandwidth_by_source() {
 
     while true; do
         iteration=$((iteration + 1))
-        bandwidth_by_source_sample "$seconds" "$tcpdump_filter" "$iteration"
+        bandwidth_by_source_sample "$seconds" "$tcpdump_filter" "$iteration" || {
+            if [ "$?" -eq 130 ]; then
+                break
+            fi
+            return 1
+        }
         if [ "$loops" -gt 0 ] && [ "$iteration" -ge "$loops" ]; then
             break
         fi
@@ -1256,6 +1286,10 @@ bandwidth_by_source_sample() {
     local data_file
     local max_bytes
     local max_bps
+    local tcpdump_pid
+    local elapsed=0
+    local key
+    local stopped=0
 
     if ! command -v tcpdump >/dev/null 2>&1; then
         echo "tcpdump is required for bandwidth-by-source sampling."
@@ -1265,11 +1299,24 @@ bandwidth_by_source_sample() {
 
     tmp_file=$(mktemp)
     set +e
-    if command -v timeout >/dev/null 2>&1; then
-        run_as_root timeout "$seconds" tcpdump -ni "$GRE_IF" -q "ip and ($tcpdump_filter)" > "$tmp_file" 2>/dev/null
-    else
-        run_as_root tcpdump -ni "$GRE_IF" -q -c 500 "ip and ($tcpdump_filter)" > "$tmp_file" 2>/dev/null
-    fi
+    run_as_root tcpdump -l -ni "$GRE_IF" -q "ip and ($tcpdump_filter)" > "$tmp_file" 2>/dev/null &
+    tcpdump_pid=$!
+    while [ "$elapsed" -lt "$seconds" ]; do
+        if read -rsn1 -t 1 key; then
+            case "$key" in
+                q|Q)
+                    stopped=1
+                    break
+                    ;;
+            esac
+        fi
+        if ! kill -0 "$tcpdump_pid" 2>/dev/null; then
+            break
+        fi
+        elapsed=$((elapsed + 1))
+    done
+    kill "$tcpdump_pid" 2>/dev/null || true
+    wait "$tcpdump_pid" 2>/dev/null || true
     set -e
 
     tput cup 0 0 2>/dev/null || clear
@@ -1278,8 +1325,14 @@ bandwidth_by_source_sample() {
     echo "       GREX Bandwidth by Source         "
     echo "========================================"
     date
-    echo "Interface: $GRE_IF  Interval: ${seconds}s  Refresh: $iteration  Filter: internal sources only"
+    echo "Interface: $GRE_IF  Interval: ${seconds}s  Refresh: $iteration  Press q to return"
+    echo "Filter: internal sources only"
     echo
+
+    if [ "$stopped" -eq 1 ]; then
+        rm -f "$tmp_file"
+        return 130
+    fi
 
     if [ ! -s "$tmp_file" ]; then
         echo "No IP packets observed during the sample window."

@@ -535,6 +535,7 @@ These tools are observational by default. They do not change `GRE_MTU`,
 `MSS_MODE`, `MSS_VALUE`, firewall rules, or service state automatically.
 Bandwidth-by-source uses short packet sampling and can add CPU load on busy
 gateways; keep sample durations small during peak traffic.
+Live diagnostics screens use `q` to return to the previous menu.
 
 ### Traffic monitoring
 
